@@ -44,6 +44,7 @@ class State(object):
     self._quit = False
     self._mode = 'training'
     self._arm = arm
+    self.unlock_joints()
     self._current_position = np.empty(arm.dof_count, dtype=np.float64)
     from threading import Lock
     self._mutex = Lock()
@@ -63,16 +64,27 @@ class State(object):
   @property
   def current_position(self):
     return self._current_position
-  
+
   @property
   def number_of_waypoints(self):
     return len(self._waypoints)
+
+  @property
+  def locked_joints(self):
+    return self._locked_joints
 
   def lock(self):
     self._mutex.acquire()
 
   def unlock(self):
     self._mutex.release()
+
+  def unlock_joints(self):
+    self._locked_joints = [None for _ in range(self._arm.dof_count)]
+
+  def lock_joints(self, joint_numbers):
+    for joint_number in joint_numbers:
+      self._locked_joints[joint_number] = self._current_position[joint_number]
 
 
 def build_trajectory(state):
@@ -139,12 +151,19 @@ def command_proc(state):
       command.position = pos
       command.velocity = vel
     elif current_mode == 'training' and prev_mode != 'training':
-      # Clear old position commands
-      command.position = None
+      # Clear old position and velocity commands
+      command.position = None #state.current_position
+      command.velocity = None
+
+    # for locked joints force position to hold
+    for joint_number, lock_pos in enumerate(state.locked_joints):
+      if lock_pos is not None:
+        command.position[joint_number] = lock_pos
+        command.velocity[joint_number] = 0.0
+
     group.send_command(command)
     state.unlock()
     prev_mode = current_mode
-
 
 def add_waypoint(state, stop):
   if state.number_of_waypoints == 0:
@@ -165,19 +184,32 @@ def add_waypoint(state, stop):
   vel[:] = vel_accel_val
   acc[:] = vel_accel_val
   state._waypoints.append(waypoint)
+  print("Added Waypoint :")
+  print(waypoint.position);
 
 
 def clear_waypoints(state):
   state._waypoints = list()
 
-
 def print_and_cr(msg):
   sys.stdout.write(msg + '\r\n')
 
+def load_gain(group, gain_xml_fn):
+  group_cmd = hebi.GroupCommand(group.size)
+  group_cmd.read_gains(gain_xml_fn)
+  group.send_command_with_acknowledgement(group_cmd)
+  print('loaded gain from ', gain_xml_fn)
+
+def save_gain(group, gain_xml_fn):
+  group_info = group.request_info()
+  if group_info is not None:
+    group_info.write_gains(gain_xml_fn)
+    print('saved gain')
 
 def run():
-  arm = arm_container.create_3_dof()
+  arm = arm_container.create_5_dof('chopstick.hrdf')
   state = State(arm)
+  load_gain(state.arm.group, 'chopstick-gains.xml')
 
   from threading import Thread
   cmd_thread = Thread(target=command_proc,
@@ -185,7 +217,7 @@ def run():
                       args=(state,))
   cmd_thread.start()
 
-  print_and_cr("Press 'w' to add waypoint ('s' for stopping at this waypoint), 'c' to clear waypoints, 'p' to playback, and 'q' to quit.")
+  print_and_cr("Press 'w' to add waypoint ('s' for stopping at this waypoint), 'c' to clear waypoints, 'p' to playback, 'g' to save gains, and 'q' to quit.")
   print_and_cr("When in playback mode, 't' resumes training, and 'q' quits.")
 
   res = getch()
@@ -196,11 +228,19 @@ def run():
 
     current_mode = state.mode
 
-    if current_mode == 'training':
+    if res == 'g':
+      print('saving gains')
+      save_gain(state.arm.group, 'chopstick-gains.xml')
+    elif current_mode == 'training':
       if res == 'w':
         add_waypoint(state, False)
       elif res == 's':
         add_waypoint(state, True)
+      elif res == 'l':
+        joint_numbers = list(map(int,input("Enter joint numbers to be locked").split()))
+        state.lock_joints(joint_numbers)
+      elif res == 'u':
+        state.unlock_joints()
       elif res == 'c':
         clear_waypoints(state)
       elif res == 'p':

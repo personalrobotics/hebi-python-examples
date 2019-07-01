@@ -84,3 +84,34 @@ def create_3_dof():
 
   assert arm.size == model.dof_count
   return ArmContainer(arm, model)
+
+
+def create_5_dof(hrdf_filename):
+  lookup = hebi.Lookup()
+
+  # You can modify the names here to match modules found on your network
+  module_family = 'feeding'
+  module_names = ['0.base', '1.shoulder', '2.elbow','3.wrist1','4.wrist2']
+
+  from time import sleep
+  sleep(2)
+  arm = lookup.get_group_from_names([module_family], module_names)
+
+  if arm is None:
+    print('\nCould not find arm group: Did you forget to set the module family and names?')
+    print('Searched for modules named:')
+    print("{0} with family '{1}'".format(
+      ', '.join(["'{0}'".format(entry) for entry in module_names]), module_family))
+
+    print('Modules on the network:')
+    for entry in lookup.entrylist:
+      print(entry)
+    else:
+      print('[No Modules Found]')
+    exit(1)
+
+  model = hebi.robot_model.import_from_hrdf(hrdf_filename)
+
+  assert arm.size == model.dof_count
+  return ArmContainer(arm, model)
+
