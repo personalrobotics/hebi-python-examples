@@ -26,7 +26,12 @@ class ArmContainer(object):
     Gets the torques which approximately balance out the effect
     of gravity on the arm
     """
+    #print('accelerometer', feedback[0].accelerometer, '\n')
     gravity = -1.0*feedback[0].accelerometer
+    print('gravity', gravity, '\n')
+
+    #gravity = np.array([0,0,-1]) # Assume the gravity points down from the first module
+
     gravity_norm = np.linalg.norm(gravity)
     if gravity_norm > 0.0:
       gravity  = gravity / gravity_norm * 9.81
