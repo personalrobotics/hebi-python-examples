@@ -21,30 +21,28 @@ class ArmContainer(object):
   def robot(self):
     return self._robot
 
-  def get_efforts(self, feedback):
+  def get_grav_comp_efforts(self, feedback, output=None):
     """
-    Gets the torques whih approximately balance out the effect
+    Gets the torques which approximately balance out the effect
     of gravity on the arm
     """
     gravity = -1.0*feedback[0].accelerometer
     gravity_norm = np.linalg.norm(gravity)
     if gravity_norm > 0.0:
-      gravity *= 9.81/gravity_norm
-    else:
-      return np.zeros(self._robot.dof_count, dtype=np.float64)
+      gravity  = gravity / gravity_norm * 9.81
 
     num_dof = self._robot.dof_count
-    num_frames = self._robot.get_frame_count('com')
-    jacobians = self._robot.get_jacobians('com', feedback.position)
-
+    num_frames = self._robot.get_frame_count('CoM')
+    jacobians = self._robot.get_jacobians('CoM', feedback.position)
     masses = self._masses
-    comp_torque = np.asmatrix(np.zeros((num_dof, 1), dtype=np.float64))
+
+    comp_torque = output or np.asmatrix(np.zeros((num_dof, 1), dtype=np.float64))
     wrench_vec = np.zeros((6, 1), dtype=np.float64)
 
     for i in range(num_frames):
       # Set translational part
       for j in range(3):
-        wrench_vec[j, 0] = -gravity[j] * masses[i]
+        wrench_vec[j, 0] = gravity[j] * masses[i]
       comp_torque += jacobians[i].T * wrench_vec
 
     return comp_torque.A1

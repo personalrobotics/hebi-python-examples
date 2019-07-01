@@ -132,7 +132,7 @@ def command_proc(state):
       break
 
     feedback.get_position(state.current_position)
-    command.effort = state.arm.get_efforts(feedback)
+    command.effort = state.arm.get_grav_comp_efforts(feedback)
 
     current_mode = state.mode
 
