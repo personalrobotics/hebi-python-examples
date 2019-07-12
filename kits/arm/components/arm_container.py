@@ -28,7 +28,7 @@ class ArmContainer(object):
     """
     #print('accelerometer', feedback[0].accelerometer, '\n')
     gravity = -1.0*feedback[0].accelerometer
-    print('gravity', gravity, '\n')
+    #print('gravity', gravity, '\n')
 
     #gravity = np.array([0,0,-1]) # Assume the gravity points down from the first module
 
