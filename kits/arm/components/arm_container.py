@@ -47,7 +47,7 @@ class ArmContainer(object):
     for i in range(num_frames):
       # Set translational part
       for j in range(3):
-        wrench_vec[j, 0] = gravity[j] * masses[i]
+        wrench_vec[j, 0] = - gravity[j] * masses[i]
       comp_torque += jacobians[i].T * wrench_vec
 
     return comp_torque.A1

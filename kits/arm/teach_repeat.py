@@ -132,7 +132,9 @@ def command_proc(state):
       break
 
     feedback.get_position(state.current_position)
-    command.effort = state.arm.get_grav_comp_efforts(feedback)
+    grav_comp_effort = state.arm.get_grav_comp_efforts(feedback).copy()
+    grav_comp_effort[1] = grav_comp_effort[1] - 7.0
+    command.effort = grav_comp_effort
 
     current_mode = state.mode
 
@@ -235,7 +237,8 @@ def run():
       if res == 'w':
         add_waypoint(state, False)
       elif res == 's':
-        add_waypoint(state, True)
+        for _ in range(5):
+          add_waypoint(state, True)
       elif res == 'l':
         joint_numbers = list(map(int,input("Enter joint numbers to be locked").split()))
         state.lock_joints(joint_numbers)
