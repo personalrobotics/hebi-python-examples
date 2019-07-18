@@ -29,8 +29,8 @@ class ArmContainer(object):
     # Find the determinant of the jacobian at the endeffector of the solution
     # to the IK. If below a set threshold, set the joint velocities to zero
     # in an attempt to avoid nearing the kinematic singularity. 
-    #jacobian_new = robot.get_jacobian_end_effector(new_arm_joint_angs)[0:3, 0:3]
-    # det_J_new = abs(np.linalg.det(jacobian_new))
+    jacobian_new = robot.get_jacobian_end_effector(new_arm_joint_angs)[0:3, 0:3]
+    det_J_new = abs(np.linalg.det(jacobian_new))
 
     # if (self._current_det_expected < Arm.Jacobian_Determinant_Threshold) and (det_J_new < self._current_det_expected):
     #   # Near singularity - don't command arm towards it
@@ -47,7 +47,7 @@ class ArmContainer(object):
     # wrist_vel = self._direction*self._user_commanded_wrist_velocity
     # self._joint_velocities[3, 0] = self._joint_velocities[1, 0]+self._joint_velocities[2, 0]+wrist_vel
     # self._joint_angles[3, 0] = self._joint_angles[3, 0]+(self._joint_velocities[3, 0]*dt)
-    return new_arm_joint_angs
+    return jacobian_new
 
   def get_FK(self, positions):
     robot = self._robot
