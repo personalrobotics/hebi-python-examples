@@ -20,13 +20,45 @@ class ArmContainer(object):
   @property
   def robot(self):
     return self._robot
+  
+  def get_jog(self, new_grip_pos, positions):
+
+    robot = self._robot
+    xyz_objective = hebi.robot_model.endeffector_position_objective(new_grip_pos)
+    new_arm_joint_angs = robot.solve_inverse_kinematics(positions, xyz_objective)
+    # Find the determinant of the jacobian at the endeffector of the solution
+    # to the IK. If below a set threshold, set the joint velocities to zero
+    # in an attempt to avoid nearing the kinematic singularity. 
+    #jacobian_new = robot.get_jacobian_end_effector(new_arm_joint_angs)[0:3, 0:3]
+    # det_J_new = abs(np.linalg.det(jacobian_new))
+
+    # if (self._current_det_expected < Arm.Jacobian_Determinant_Threshold) and (det_J_new < self._current_det_expected):
+    #   # Near singularity - don't command arm towards it
+    #   self._joint_velocities[0:3, 0] = 0.0
+    # else:
+    #   try:
+    #     self._joint_velocities[0:3, 0] = np.linalg.solve(self._current_j_actual_f[0:3, 0:3], self._user_commanded_grip_velocity).reshape((3, 1))
+    #     self._joint_angles[0:3, 0] = new_arm_joint_angs[0:3].reshape((3, 1))
+    #     np.copyto(self._grip_pos, self._new_grip_pos)
+    #   except np.linalg.LinAlgError as lin:
+    #     # This may happen still sometimes
+    #     self._joint_velocities[0:3] = 0.0
+
+    # wrist_vel = self._direction*self._user_commanded_wrist_velocity
+    # self._joint_velocities[3, 0] = self._joint_velocities[1, 0]+self._joint_velocities[2, 0]+wrist_vel
+    # self._joint_angles[3, 0] = self._joint_angles[3, 0]+(self._joint_velocities[3, 0]*dt)
+    return new_arm_joint_angs
+
+  def get_FK(self, positions):
+    robot = self._robot
+    return robot.get_end_effector(positions)
 
   def get_grav_comp_efforts(self, feedback, output=None):
     """
     Gets the torques which approximately balance out the effect
     of gravity on the arm
     """
-    #print('accelerometer', feedback[0].accelerometer, '\n')
+    #print('accelerometer', feedback[0].accelerometer, '\nnext_angles')
     gravity = -1.0*feedback[0].accelerometer
     #print('gravity', gravity, '\n')
 
