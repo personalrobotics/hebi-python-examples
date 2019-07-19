@@ -125,6 +125,7 @@ def command_proc(state):
   feedback = hebi.GroupFeedback(num_modules)
   prev_mode = state.mode
   start_time = time()
+  last_time = start_time
   trajectory = None
 
 
@@ -145,6 +146,10 @@ def command_proc(state):
 
     current_mode = state.mode
     
+    cur_time = time()
+    dt = cur_time - last_time
+    last_time = cur_time
+
     x_speed = 0.0
     y_speed = 0.0
     z_speed = 0.0
@@ -152,23 +157,28 @@ def command_proc(state):
     if current_mode == 'operational':
       pose = state.arm.get_FK(state.current_position)
       if state.jog_direction == 'x_plus':
-        x_speed = 0.0025
+        x_speed = 0.1
       elif state.jog_direction == 'y_plus':
-        y_speed = 0.0025
+        y_speed = 0.1
       elif state.jog_direction == 'z_plus':
-        z_speed = 0.001
+        z_speed = 0.1
       elif state.jog_direction == 'x_minus':
-        x_speed = -0.0025
+        x_speed = -0.1
       elif state.jog_direction == 'y_minus':
-        y_speed = -0.0025
+        y_speed = -0.1
       elif state.jog_direction == 'z_minus':
-        z_speed = -0.0025
+        z_speed = -0.1
       else:
         x_speed = 0.0
         y_speed = 0.0
         z_speed = 0.0
-      next_angles = state.arm.get_jog([pose[0, 3] + x_speed, pose[1, 3] + y_speed, pose[2, 3] + z_speed], state.current_position)
+      next_angles = state.current_position
+      next_speed = [0.0, 0.0, 0.0, 0.0, 0.0]
+      jog_cmd = state.arm.get_jog([pose[0, 3], pose[1, 3], pose[2, 3]], state.current_position, [x_speed, y_speed, z_speed], dt)
+      next_angles[0:3] = jog_cmd[0].copy()
+      next_speed[0:3] = jog_cmd[1].copy()
       command.position = next_angles
+      command.velocity = next_speed
 
     group.send_command(command)
     state.unlock()

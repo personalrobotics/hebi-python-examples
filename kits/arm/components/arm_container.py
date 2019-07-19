@@ -21,10 +21,14 @@ class ArmContainer(object):
   def robot(self):
     return self._robot
   
-  def get_jog(self, new_grip_pos, positions):
+  def get_jog(self, cur_pose, positions, cmd_vel, dt):
 
     robot = self._robot
-    xyz_objective = hebi.robot_model.endeffector_position_objective(new_grip_pos)
+    
+    cur_pose[0] = cur_pose[0] + cmd_vel[0]*dt;
+    cur_pose[1] = cur_pose[1] + cmd_vel[1]*dt;
+    cur_pose[2] = cur_pose[2] + cmd_vel[2]*dt;
+    xyz_objective = hebi.robot_model.endeffector_position_objective(cur_pose)
     new_arm_joint_angs = robot.solve_inverse_kinematics(positions, xyz_objective)
     # Find the determinant of the jacobian at the endeffector of the solution
     # to the IK. If below a set threshold, set the joint velocities to zero
@@ -32,22 +36,25 @@ class ArmContainer(object):
     jacobian_new = robot.get_jacobian_end_effector(new_arm_joint_angs)[0:3, 0:3]
     det_J_new = abs(np.linalg.det(jacobian_new))
 
-    # if (self._current_det_expected < Arm.Jacobian_Determinant_Threshold) and (det_J_new < self._current_det_expected):
-    #   # Near singularity - don't command arm towards it
-    #   self._joint_velocities[0:3, 0] = 0.0
-    # else:
-    #   try:
-    #     self._joint_velocities[0:3, 0] = np.linalg.solve(self._current_j_actual_f[0:3, 0:3], self._user_commanded_grip_velocity).reshape((3, 1))
-    #     self._joint_angles[0:3, 0] = new_arm_joint_angs[0:3].reshape((3, 1))
-    #     np.copyto(self._grip_pos, self._new_grip_pos)
-    #   except np.linalg.LinAlgError as lin:
-    #     # This may happen still sometimes
-    #     self._joint_velocities[0:3] = 0.0
+    joint_velocities = np.empty(3, np.float64)
+    joint_velocities = [0.0, 0.0, 0.0]
+
+    if (det_J_new < 0.01):
+      # Near singularity - don't command arm towards it
+      joint_velocities = [0.0, 0.0, 0.0]
+    else:
+      try:
+        joint_velocities = np.linalg.solve(jacobian_new, cmd_vel)
+    #    self._joint_angles[0:3, 0] = new_arm_joint_angs[0:3].reshape((3, 1))
+    #    np.copyto(self._grip_pos, self._new_grip_pos)
+      except np.linalg.LinAlgError as lin:
+    #    # This may happen still sometimes
+        joint_velocities = [0.0, 0.0, 0.0]
 
     # wrist_vel = self._direction*self._user_commanded_wrist_velocity
     # self._joint_velocities[3, 0] = self._joint_velocities[1, 0]+self._joint_velocities[2, 0]+wrist_vel
     # self._joint_angles[3, 0] = self._joint_angles[3, 0]+(self._joint_velocities[3, 0]*dt)
-    return jacobian_new
+    return new_arm_joint_angs[0:3] , joint_velocities
 
   def get_FK(self, positions):
     robot = self._robot
