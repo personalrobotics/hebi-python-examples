@@ -25,9 +25,6 @@ class ArmContainer(object):
 
     robot = self._robot
     
-    cur_pose[0] = cur_pose[0] + cmd_vel[0]*dt;
-    cur_pose[1] = cur_pose[1] + cmd_vel[1]*dt;
-    cur_pose[2] = cur_pose[2] + cmd_vel[2]*dt;
     xyz_objective = hebi.robot_model.endeffector_position_objective(cur_pose)
     new_arm_joint_angs = robot.solve_inverse_kinematics(positions, xyz_objective)
     # Find the determinant of the jacobian at the endeffector of the solution
