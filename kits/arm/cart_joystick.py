@@ -51,6 +51,7 @@ class State(object):
     self._mutex = Lock()
     self._pose = arm.get_FK(self._current_position)
     self._update_pose = True
+    self._speed_base = 0.0
 
   @property
   def quit(self):
@@ -158,19 +159,21 @@ def command_proc(state):
     
     pose = state._pose
 
+    if(state._speed_base < 0.05):
+        state._speed_base += 0.001
     if current_mode == 'operational':
       if state.jog_direction == 'x_plus':
-        x_speed = 0.05
+        x_speed = state._speed_base
       elif state.jog_direction == 'y_plus':
-        y_speed = 0.05
+        y_speed = state._speed_base
       elif state.jog_direction == 'z_plus':
-        z_speed = 0.05
+        z_speed = state._speed_base
       elif state.jog_direction == 'x_minus':
-        x_speed = -0.05
+        x_speed = -state._speed_base
       elif state.jog_direction == 'y_minus':
-        y_speed = -0.05
+        y_speed = -state._speed_base
       elif state.jog_direction == 'z_minus':
-        z_speed = -0.05
+        z_speed = -state._speed_base
       else:
         x_speed = 0.0
         y_speed = 0.0
@@ -181,10 +184,14 @@ def command_proc(state):
       state._pose[1] = state._pose[1] + y_speed*dt;
       state._pose[2] = state._pose[2] + z_speed*dt;
       jog_cmd = state.arm.get_jog([state._pose[0, 3], state._pose[1, 3], state._pose[2, 3]], state.current_position, [x_speed, y_speed, z_speed], dt)
-      next_angles[0:3] = jog_cmd[0].copy()
-      next_speed[0:3] = jog_cmd[1].copy()
+      next_angles[0:3] = jog_cmd[0]
+      next_speed[0:3] = jog_cmd[1]
       command.position = next_angles
       command.velocity = next_speed
+
+      grav_comp_effort = state.arm.get_grav_comp_efforts(feedback).copy()
+      grav_comp_effort[1] = grav_comp_effort[1] - 9.0
+      command.effort = grav_comp_effort
 
     group.send_command(command)
     state.unlock()
@@ -261,21 +268,27 @@ def run():
         state._pose = state.arm.get_FK(state.current_position)
       if res == 'w':
         state._jog_direction = 'x_plus'
+        state._speed_base = 0.0
         state._update_pose = False
       if res == 'a':
         state._jog_direction = 'y_plus'
+        state._speed_base = 0.0
         state._update_pose = False
       if res == 'j':
         state._jog_direction = 'z_plus'
+        state._speed_base = 0.0
         state._update_pose = False
       if res == 's':
         state._jog_direction = 'x_minus'
+        state._speed_base = 0.0
         state._update_pose = False
       if res == 'd':
         state._jog_direction = 'y_minus'
+        state._speed_base = 0.0
         state._update_pose = False
       if res == 'l':
         state._jog_direction = 'z_minus'
+        state._speed_base = 0.0
         state._update_pose = False
       if res == 'k':
         state._jog_direction = '0'
