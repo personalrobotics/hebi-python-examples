@@ -47,10 +47,11 @@ class State(object):
     self._jog_direction = '0'
     self.unlock_joints()
     self._current_position = np.empty(arm.dof_count, dtype=np.float64)
+    self._current_velocity = np.empty(arm.dof_count, dtype=np.float64)
     from threading import Lock
     self._mutex = Lock()
-    self._pose = arm.get_FK(self._current_position)
-    self._update_pose = True
+    self._cmd_pose = arm.get_FK(self._current_position)
+    self._update_cmd_pose = True
     self._speed_base = 0.0
 
   @property
@@ -68,6 +69,10 @@ class State(object):
   @property
   def current_position(self):
     return self._current_position
+
+  @property
+  def current_velocity(self):
+    return self._current_velocity
 
   @property
   def number_of_waypoints(self):
@@ -143,10 +148,12 @@ def command_proc(state):
       break
 
     feedback.get_position(state.current_position)
+    feedback.get_velocity(state.current_velocity)
     grav_comp_effort = state.arm.get_grav_comp_efforts(feedback).copy()
-    grav_comp_effort[1] = grav_comp_effort[1] - 7.0
-    command.effort = grav_comp_effort
-
+    total_effort = np.empty(5, np.float64)
+    
+    spring_effort = 4.0 - 5.0*(state.current_position[1] - 1.4)
+    np.add(grav_comp_effort, [0.0, -spring_effort, 0.0, 0.0, 0.0], total_effort)
     current_mode = state.mode
     
     cur_time = time()
@@ -157,9 +164,7 @@ def command_proc(state):
     y_speed = 0.0
     z_speed = 0.0
     
-    pose = state._pose
-
-    if(state._speed_base < 0.05):
+    if(state._speed_base < 0.1):
         state._speed_base += 0.001
     if current_mode == 'operational':
       if state.jog_direction == 'x_plus':
@@ -178,21 +183,56 @@ def command_proc(state):
         x_speed = 0.0
         y_speed = 0.0
         z_speed = 0.0
+
       next_angles = state.current_position
       next_speed = [0.0, 0.0, 0.0, 0.0, 0.0]
-      state._pose[0] = state._pose[0] + x_speed*dt;
-      state._pose[1] = state._pose[1] + y_speed*dt;
-      state._pose[2] = state._pose[2] + z_speed*dt;
-      jog_cmd = state.arm.get_jog([state._pose[0, 3], state._pose[1, 3], state._pose[2, 3]], state.current_position, [x_speed, y_speed, z_speed], dt)
+      state._cmd_pose[0] = state._cmd_pose[0] + x_speed*dt;
+      state._cmd_pose[1] = state._cmd_pose[1] + y_speed*dt;
+      state._cmd_pose[2] = state._cmd_pose[2] + z_speed*dt;
+      
+      cmd_pose_xyz = np.empty(3, np.float64)
+      cmd_pose_xyz = [state._cmd_pose[0, 3], state._cmd_pose[1, 3], state._cmd_pose[2, 3]]
+
+      cmd_vel_xyz = np.empty(3, np.float64)
+      cmd_vel_xyz = [x_speed, y_speed, z_speed]
+
+      jog_cmd = state.arm.get_jog(cmd_pose_xyz, state.current_position, cmd_vel_xyz, dt)
       next_angles[0:3] = jog_cmd[0]
       next_speed[0:3] = jog_cmd[1]
       command.position = next_angles
       command.velocity = next_speed
 
-      grav_comp_effort = state.arm.get_grav_comp_efforts(feedback).copy()
-      grav_comp_effort[1] = grav_comp_effort[1] - 9.0
-      command.effort = grav_comp_effort
+      current_pose = state.arm.get_FK(state.current_position)
+      current_pose_xyz = np.empty(3, np.float64)
+      current_pose_xyz = [current_pose[0, 3], current_pose[1, 3], current_pose[2, 3]]
 
+      xyz_pos_error = np.zeros(3, np.float64)
+      xyz_pos_effort = np.zeros(3, np.float64)
+      xyz_pos_joint_effort = np.zeros(5, np.float64)
+      xyz_pos_gains = 0.0*np.ones(3, np.float64)
+
+      np.subtract(cmd_pose_xyz, current_pose_xyz, xyz_pos_error)
+      np.multiply(xyz_pos_error, xyz_pos_gains, xyz_pos_effort)
+
+      xyz_vel_error = np.zeros(3, np.float64)
+      xyz_vel_effort = np.zeros(3, np.float64)
+      xyz_vel_joint_effort = np.zeros(5, np.float64)
+      xyz_vel_gains = 0.0*np.ones(3, np.float64)
+      xyz_vel_current = np.zeros(3, np.float64)
+
+
+      np.dot(state.arm._robot.get_jacobian_end_effector(state.current_position)[0:3, 0:3], state.current_velocity[0:3], xyz_vel_current)
+      np.subtract(cmd_vel_xyz, xyz_vel_current, xyz_vel_error)
+      np.multiply(xyz_vel_error, xyz_vel_gains, xyz_vel_effort)
+      
+      xyz_effort = np.zeros(3, np.float64)
+      xyz_joint_effort = np.zeros(5, np.float64)
+
+      #np.add(xyz_pos_effort, xyz_vel_effort, xyz_effort)
+      np.dot(state.arm._robot.get_jacobian_end_effector(state.current_position)[0:3, 0:3].T, xyz_effort, xyz_joint_effort[0:3])
+      #np.add(total_effort, xyz_joint_effort, total_effort)
+
+    command.effort = total_effort
     group.send_command(command)
     state.unlock()
     prev_mode = current_mode
@@ -260,39 +300,41 @@ def run():
 
     current_mode = state.mode
 
+    start_speed = 0.00
+
     if res == 'p':
       state._mode = 'operational'
 
     if state._mode == 'operational':
-      if state._update_pose == True:
-        state._pose = state.arm.get_FK(state.current_position)
+      if state._update_cmd_pose == True:
+        state._cmd_pose = state.arm.get_FK(state.current_position)
       if res == 'w':
         state._jog_direction = 'x_plus'
-        state._speed_base = 0.0
-        state._update_pose = False
+        state._speed_base = start_speed
+        state._update_cmd_pose = False
       if res == 'a':
         state._jog_direction = 'y_plus'
-        state._speed_base = 0.0
-        state._update_pose = False
+        state._speed_base = start_speed
+        state._update_cmd_pose = False
       if res == 'j':
         state._jog_direction = 'z_plus'
-        state._speed_base = 0.0
-        state._update_pose = False
+        state._speed_base = start_speed
+        state._update_cmd_pose = False
       if res == 's':
         state._jog_direction = 'x_minus'
-        state._speed_base = 0.0
-        state._update_pose = False
+        state._speed_base = start_speed
+        state._update_cmd_pose = False
       if res == 'd':
         state._jog_direction = 'y_minus'
-        state._speed_base = 0.0
-        state._update_pose = False
+        state._speed_base = start_speed
+        state._update_cmd_pose = False
       if res == 'l':
         state._jog_direction = 'z_minus'
-        state._speed_base = 0.0
-        state._update_pose = False
+        state._speed_base = start_speed
+        state._update_cmd_pose = False
       if res == 'k':
         state._jog_direction = '0'
-        state._update_pose = True
+        state._update_cmd_pose = True
 
     state.unlock()
     res = getch()
