@@ -53,6 +53,9 @@ class State(object):
     self._cmd_pose = arm.get_FK(self._current_position)
     self._update_cmd_pose = True
     self._speed_base = 0.0
+    self._teleop_target_zero = -1
+    self._teleop_latest_target = np.zeros(3) # TODO to 6D pose
+    self._robot_zero_pose = np.zeros((arm.dof_count, 4)) # TODO why 4
 
   @property
   def quit(self):
@@ -85,6 +88,18 @@ class State(object):
   @property
   def jog_direction(self):
     return self._jog_direction
+
+  @property
+  def teleop_target_zero(self):
+    return self._teleop_target_zero
+
+  @property
+  def teleop_latest_target(self):
+    return self._teleop_latest_target
+  
+  @property
+  def robot_zero_pose(self):
+    return self._robot_zero_pose
   
 
   def lock(self):
@@ -100,27 +115,88 @@ class State(object):
     for joint_number in joint_numbers:
       self._locked_joints[joint_number] = self._current_position[joint_number]
 
+import rospy
+from geometry_msgs.msg import PointStamped
+import tf
 
-def build_trajectory(state):
-  num_modules = state.arm.group.size
+def get_current_pose(arm, feedback):
+  current_position = np.empty(arm.dof_count, dtype=np.float64)
+  feedback.get_position(current_position)
+  print("Got current position", current_position, '\r\n')
+  return arm.get_FK(current_position)
 
-  # Reuse the first waypoint as the last one by adding it to the end.
-  state._waypoints.append(state._waypoints[0])
+def init_teleop(state):
+  print_and_cr('Initializing teleoperation')
+  rospy.init_node('hebiteleop')
 
-  # Build trajectory
-  num_waypoints = len(state._waypoints)
-  positions = np.empty((num_modules, num_waypoints), dtype=np.float64)
-  velocities = np.empty((num_modules, num_waypoints), dtype=np.float64)
-  accelerations = np.empty((num_modules, num_waypoints), dtype=np.float64)
+  # tf
+  transformListener = tf.TransformListener()
+  transformListener.waitForTransform("/optitrack_natnet", "/map", rospy.Time(0),rospy.Duration(1.0))
 
-  for i in range(num_waypoints):
-    waypoint = state._waypoints[i]
-    positions[:, i] = waypoint.position
-    velocities[:, i] = waypoint.velocity
-    accelerations[:, i] = waypoint.acceleration
+  # Set the current robot pose to correspond to the first published teleop target (both are considered "zero")
+  #state.lock()
+  print_and_cr('setting zero state with lock')
+  state._robot_zero_pose = state._cmd_pose
+  #state.unlock()
 
-  time_vector = trajectory_time_heuristic.get_times(positions, velocities, accelerations)
-  return hebi.trajectory.create_trajectory(time_vector, positions, velocities, accelerations)
+  def callback(data):
+    #rospy.loginfo('Received chobi-teleop info %f %f %f', data.point.x, data.point.y, data.point.z)
+    #cur_point = transformListener.transformPoint("map", data).point
+    cur_point = data.point
+    #state.lock()
+    if state.teleop_target_zero == -1:
+      state._teleop_target_zero = cur_point
+      state._mode = 'teleop'
+      rospy.loginfo('Initialization of teleoperation is completed')
+
+    state._teleop_latest_target =  cur_point
+    #state.unlock()
+  
+  rospy.Subscriber('/M1/point', PointStamped, callback, queue_size=1)
+  #rospy.spin() # does nothing but block? so we don't need it?
+
+def construct_command(arm, feedback, velocity, dt):
+  command = hebi.GroupCommand(arm.group.size)
+  current_position = np.empty(arm.dof_count, dtype=np.float64)
+  current_velocity = np.empty(arm.dof_count, dtype=np.float64)
+  feedback.get_position(current_position)
+  feedback.get_velocity(current_velocity)
+
+  # position and velocity
+  current_pose = arm.get_FK(current_position)
+  velocity = velocity.reshape(-1)
+  cmd_pose_xyz = current_pose[0:3,3].reshape(-1)
+  cmd_pose_xyz += velocity * dt
+  cmd_vel_xyz = velocity
+  cmd_pose_xyz = cmd_pose_xyz.tolist()
+  cmd_vel_xyz = cmd_vel_xyz.tolist()
+  rospy.loginfo(cmd_pose_xyz)
+  rospy.loginfo(cmd_vel_xyz)
+  
+  jog_cmd = arm.get_jog(cmd_pose_xyz, current_position, cmd_vel_xyz, dt)
+  command.position = jog_cmd[0]
+  command.velocity = jog_cmd[1]
+
+  # effort: grav comp and spring offset
+  grav_comp_effort = arm.get_grav_comp_efforts(feedback).copy()
+  spring_effort = np.zeros(arm.dof_count)
+  spring_offset = 4.0 - 5.0*(current_position[1] - 1.4)
+  spring_effort[1] = -spring_offset
+  effort = grav_comp_effort + spring_effort
+  command.effort = effort
+
+  return command
+
+def construct_velocity(state, feedback):
+  a = state.teleop_latest_target
+  b = state.teleop_target_zero
+  target_pose = np.zeros_like(state.robot_zero_pose)
+  target_pose[0:3,3] = np.array([a.x-b.x, a.y-b.y, a.z-b.z]).reshape(3,1)
+  delta_pose = target_pose + state.robot_zero_pose - get_current_pose(state.arm, feedback)
+  delta_pose = delta_pose[0:3,3].reshape(-1)
+  np.clip(delta_pose, -0.05, 0.05, out=delta_pose)
+  rospy.loginfo(delta_pose)
+  return delta_pose
 
 
 def command_proc(state):
@@ -139,7 +215,7 @@ def command_proc(state):
 
   while True:
     if group.get_next_feedback(reuse_fbk=feedback) is None:
-      print('Did not receive feedback')
+      print_and_cr('Did not receive feedback')
       continue
 
     state.lock()
@@ -166,6 +242,12 @@ def command_proc(state):
     
     if(state._speed_base < 0.1):
         state._speed_base += 0.001
+    if current_mode == 'teleop':
+      rospy.loginfo('Confirm: in teleop mode')
+      vel = construct_velocity(state, feedback)
+      #rospy.loginfo('about to send velocity %f, %f, %f', vel[0], vel[1], vel[2])
+      construct_command(state.arm, feedback, vel, dt)
+      #group.send_command(command)
     if current_mode == 'operational':
       if state.jog_direction == 'x_plus':
         x_speed = state._speed_base
@@ -189,11 +271,9 @@ def command_proc(state):
       state._cmd_pose[0] = state._cmd_pose[0] + x_speed*dt;
       state._cmd_pose[1] = state._cmd_pose[1] + y_speed*dt;
       state._cmd_pose[2] = state._cmd_pose[2] + z_speed*dt;
+      print('cmd_pose', state._cmd_pose, '\r\n' )
       
-      cmd_pose_xyz = np.empty(3, np.float64)
       cmd_pose_xyz = [state._cmd_pose[0, 3], state._cmd_pose[1, 3], state._cmd_pose[2, 3]]
-
-      cmd_vel_xyz = np.empty(3, np.float64)
       cmd_vel_xyz = [x_speed, y_speed, z_speed]
 
       jog_cmd = state.arm.get_jog(cmd_pose_xyz, state.current_position, cmd_vel_xyz, dt)
@@ -203,7 +283,7 @@ def command_proc(state):
       command.velocity = next_speed
 
       current_pose = state.arm.get_FK(state.current_position)
-      current_pose_xyz = np.empty(3, np.float64)
+      #current_pose_xyz = np.empty(3, np.float64)
       current_pose_xyz = [current_pose[0, 3], current_pose[1, 3], current_pose[2, 3]]
 
       xyz_pos_error = np.zeros(3, np.float64)
@@ -231,37 +311,12 @@ def command_proc(state):
       #np.add(xyz_pos_effort, xyz_vel_effort, xyz_effort)
       np.dot(state.arm._robot.get_jacobian_end_effector(state.current_position)[0:3, 0:3].T, xyz_effort, xyz_joint_effort[0:3])
       #np.add(total_effort, xyz_joint_effort, total_effort)
+      command.effort = total_effort
 
-    command.effort = total_effort
+
     group.send_command(command)
     state.unlock()
     prev_mode = current_mode
-
-def add_waypoint(state, stop):
-  if state.number_of_waypoints == 0:
-    stop = True
-
-  num_modules = state.current_position.size
-
-  if stop:
-    vel_accel_val = 0.0
-  else:
-    vel_accel_val = np.nan
-
-  waypoint = Waypoint(num_modules)
-  pos = waypoint.position
-  vel = waypoint.velocity
-  acc = waypoint.acceleration
-  pos[:] = state.current_position
-  vel[:] = vel_accel_val
-  acc[:] = vel_accel_val
-  state._waypoints.append(waypoint)
-  print("Added Waypoint :")
-  print(waypoint.position);
-
-
-def clear_waypoints(state):
-  state._waypoints = list()
 
 def print_and_cr(msg):
   sys.stdout.write(msg + '\r\n')
@@ -276,7 +331,7 @@ def save_gain(group, gain_xml_fn):
   group_info = group.request_info()
   if group_info is not None:
     group_info.write_gains(gain_xml_fn)
-    print('saved gain')
+    print_and_cr('saved gain')
 
 def run():
   arm = arm_container.create_5_dof('chopstick.hrdf')
@@ -289,8 +344,7 @@ def run():
                       args=(state,))
   cmd_thread.start()
 
-  print_and_cr("Press 'w' to add waypoint ('s' for stopping at this waypoint), 'c' to clear waypoints, 'p' to playback, 'g' to save gains, and 'q' to quit.")
-  print_and_cr("When in playback mode, 't' resumes training, and 'q' quits.")
+  print_and_cr("Press 'p' to enable cartesian control (wsadjl for moving, k for stopping). Press 'g' to save gains, 't' to teleop and 'q' to quit.")
 
   res = getch()
 
@@ -302,12 +356,19 @@ def run():
 
     start_speed = 0.00
 
-    if res == 'p':
+    if res == 'g':
+      print_and_cr('saving gains')
+      save_gain(state.arm.group, 'chopstick-gains.xml')
+    elif res == 'p':
       state._mode = 'operational'
+    elif res == 't':
+      print_and_cr('Entering teleoperation mode')
+      init_teleop(state)
+
+    if state._update_cmd_pose == True:
+        state._cmd_pose = state.arm.get_FK(state.current_position)
 
     if state._mode == 'operational':
-      if state._update_cmd_pose == True:
-        state._cmd_pose = state.arm.get_FK(state.current_position)
       if res == 'w':
         state._jog_direction = 'x_plus'
         state._speed_base = start_speed
