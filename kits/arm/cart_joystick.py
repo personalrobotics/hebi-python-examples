@@ -157,7 +157,6 @@ def init_teleop(state):
 def construct_command(state, feedback, velocity, dt):
   arm = state.arm
   command = hebi.GroupCommand(arm.group.size)
-  print('construct_command')
   #current_position = np.empty(arm.dof_count, dtype=np.float64)
   #current_velocity = np.empty(arm.dof_count, dtype=np.float64)
   #feedback.get_position(current_position)
@@ -168,24 +167,21 @@ def construct_command(state, feedback, velocity, dt):
   next_speed = [0.0, 0.0, 0.0, 0.0, 0.0]
   
   x_speed, y_speed, z_speed = velocity
-  state._cmd_pose[0] = state._cmd_pose[0] + x_speed*dt;
-  state._cmd_pose[1] = state._cmd_pose[1] + y_speed*dt;
-  state._cmd_pose[2] = state._cmd_pose[2] + z_speed*dt;
+  state._cmd_pose[0,3] = state._cmd_pose[0,3] + x_speed*dt;
+  state._cmd_pose[1,3] = state._cmd_pose[1,3] + y_speed*dt;
+  state._cmd_pose[2,3] = state._cmd_pose[2,3] + z_speed*dt;
 
-  print('updated cmd pose')
-
-  current_pose = state._cmd_pose # np.array(arm.get_FK(state.current_position)) #TODO get rid of it
-  xyz_pose = current_pose[0:3,3] + np.array(velocity).reshape(3,1) * dt
-  cmd_pose_xyz = [xyz_pose[0,0], xyz_pose[1,0], xyz_pose[2,0]]
+  #current_pose = state._cmd_pose # np.array(arm.get_FK(state.current_position)) #TODO get rid of it
+  #xyz_pose = current_pose[0:3,3] + np.array(velocity).reshape(3,1) * dt
+  #cmd_pose_xyz = [xyz_pose[0,0], xyz_pose[1,0], xyz_pose[2,0]]
+  cmd_pose_xyz = [state._cmd_pose[0,3], state._cmd_pose[1,3], state._cmd_pose[2,3]]
   cmd_vel_xyz = [velocity[0,0], velocity[1,0], velocity[2,0]]
-  jog_cmd = arm.get_jog(cmd_pose_xyz, state.current_position, cmd_vel_xyz, dt)
+  jog_cmd = arm.get_jog_xyz(cmd_pose_xyz, state.current_position, cmd_vel_xyz, dt)
 
   next_angles[0:3] = jog_cmd[0]
   next_speed[0:3] = jog_cmd[1]
   command.position = next_angles
   command.velocity = next_speed
-
-  print('pos and vel')
 
   # effort: grav comp and spring offset
   '''
@@ -201,15 +197,11 @@ def construct_command(state, feedback, velocity, dt):
   np.add(grav_comp_effort, [0.0, -spring_effort, 0.0, 0.0, 0.0], total_effort)
   command.effort = total_effort
 
-  print('effort')
-
   return command
 
 def construct_velocity(state, feedback):
-  a = state.teleop_latest_target
-  b = state.teleop_target_zero
   target_pose = np.zeros_like(state.robot_zero_pose)
-  target_pose[0:3,3] = np.array(a-b).reshape(3,1)
+  target_pose[0:3,3] = np.array(state.teleop_latest_target-state.teleop_target_zero).reshape(3,1)
   delta_pose = target_pose + state.robot_zero_pose - get_current_pose(state.arm, feedback)
   velocity = np.array(delta_pose[0:3,3])
   np.clip(velocity, -0.01, 0.01, out=velocity)
@@ -281,12 +273,14 @@ def command_proc(state):
         y_speed = 0.0
         z_speed = 0.0
 
+      '''
       next_angles = state.current_position
       next_speed = [0.0, 0.0, 0.0, 0.0, 0.0]
       state._cmd_pose[0, 3] = state._cmd_pose[0, 3] + x_speed*dt;
       state._cmd_pose[1, 3] = state._cmd_pose[1, 3] + y_speed*dt;
       state._cmd_pose[2, 3] = state._cmd_pose[2, 3] + z_speed*dt;
-      base_angle = np.arctan2(state._cmd_pose[1, 3], state._cmd_pose[0, 3])
+      #base_angle = np.arctan2(state._cmd_pose[1, 3], state._cmd_pose[0, 3])
+      base_angle = np.arctan2(y_speed, x_speed)
       base_angle_compenstation = np.array([[np.cos(base_angle), -np.sin(base_angle), 0.0],
                                            [np.sin(base_angle), np.cos(base_angle), 0.0],
                                            [0.0, 0.0, 1.0]])
@@ -295,7 +289,7 @@ def command_proc(state):
       print(base_angle_compenstation)
       print('before')
       print(state._cmd_pose[0:3, 0:3])
-      #state._cmd_pose[0:3, 0:3] = base_angle_compenstation
+      state._cmd_pose[0:3, 0:3] = base_angle_compenstation*state._cmd_pose[0:3, 0:3]
       print('After')
       print(state._cmd_pose[0:3, 0:3])
 
@@ -309,6 +303,29 @@ def command_proc(state):
 
       current_pose = state.arm.get_FK(state.current_position)
     
+      command.effort = total_effort
+      '''
+      next_angles = state.current_position
+      next_speed = [0.0, 0.0, 0.0, 0.0, 0.0]
+
+      state._cmd_pose[0] = state._cmd_pose[0] + x_speed*dt;
+      state._cmd_pose[1] = state._cmd_pose[1] + y_speed*dt;
+      state._cmd_pose[2] = state._cmd_pose[2] + z_speed*dt;
+
+      cmd_pose_xyz = [state._cmd_pose[0, 3], state._cmd_pose[1, 3], state._cmd_pose[2, 3]]
+      cmd_vel_xyz = [x_speed, y_speed, z_speed]
+
+      jog_cmd = state.arm.get_jog_xyz(cmd_pose_xyz, state.current_position, cmd_vel_xyz, dt)
+      next_angles[0:3] = jog_cmd[0]
+      next_speed[0:3] = jog_cmd[1]
+      command.position = next_angles
+      command.velocity = next_speed
+
+      grav_comp_effort = state.arm.get_grav_comp_efforts(feedback).copy()
+      total_effort = np.empty(5, np.float64)
+    
+      spring_effort = 4.0 - 5.0*(state.current_position[1] - 1.4)
+      np.add(grav_comp_effort, [0.0, -spring_effort, 0.0, 0.0, 0.0], total_effort)
       command.effort = total_effort
 
       #command = construct_command(state, feedback, np.array([x_speed, y_speed, z_speed]).reshape(3,1), dt)
