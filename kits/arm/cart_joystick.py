@@ -175,7 +175,7 @@ def construct_command(state, feedback, velocity, dt):
   #xyz_pose = current_pose[0:3,3] + np.array(velocity).reshape(3,1) * dt
   #cmd_pose_xyz = [xyz_pose[0,0], xyz_pose[1,0], xyz_pose[2,0]]
   cmd_pose_xyz = [state._cmd_pose[0,3], state._cmd_pose[1,3], state._cmd_pose[2,3]]
-  cmd_vel_xyz = [velocity[0,0], velocity[1,0], velocity[2,0]]
+  cmd_vel_xyz = [x_speed, y_speed, z_speed]
   jog_cmd = arm.get_jog_xyz(cmd_pose_xyz, state.current_position, cmd_vel_xyz, dt)
 
   next_angles[0:3] = jog_cmd[0]
@@ -198,7 +198,7 @@ def construct_command(state, feedback, velocity, dt):
   command.effort = total_effort
 
   return command
-
+  
 def construct_velocity(state, feedback):
   target_pose = np.zeros_like(state.robot_zero_pose)
   target_pose[0:3,3] = np.array(state.teleop_latest_target-state.teleop_target_zero).reshape(3,1)
@@ -305,30 +305,8 @@ def command_proc(state):
     
       command.effort = total_effort
       '''
-      next_angles = state.current_position
-      next_speed = [0.0, 0.0, 0.0, 0.0, 0.0]
 
-      state._cmd_pose[0] = state._cmd_pose[0] + x_speed*dt;
-      state._cmd_pose[1] = state._cmd_pose[1] + y_speed*dt;
-      state._cmd_pose[2] = state._cmd_pose[2] + z_speed*dt;
-
-      cmd_pose_xyz = [state._cmd_pose[0, 3], state._cmd_pose[1, 3], state._cmd_pose[2, 3]]
-      cmd_vel_xyz = [x_speed, y_speed, z_speed]
-
-      jog_cmd = state.arm.get_jog_xyz(cmd_pose_xyz, state.current_position, cmd_vel_xyz, dt)
-      next_angles[0:3] = jog_cmd[0]
-      next_speed[0:3] = jog_cmd[1]
-      command.position = next_angles
-      command.velocity = next_speed
-
-      grav_comp_effort = state.arm.get_grav_comp_efforts(feedback).copy()
-      total_effort = np.empty(5, np.float64)
-    
-      spring_effort = 4.0 - 5.0*(state.current_position[1] - 1.4)
-      np.add(grav_comp_effort, [0.0, -spring_effort, 0.0, 0.0, 0.0], total_effort)
-      command.effort = total_effort
-
-      #command = construct_command(state, feedback, np.array([x_speed, y_speed, z_speed]).reshape(3,1), dt)
+      command = construct_command(state, feedback, np.array([x_speed, y_speed, z_speed]).reshape(3,1), dt)
       
 
     group.send_command(command)
