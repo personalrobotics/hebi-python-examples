@@ -53,7 +53,7 @@ class State(object):
     self._cmd_pose = arm.get_FK(self._current_position)
     self._update_cmd_pose = True
     self._speed_base = 0.0
-    self._teleop_target_zero = -1
+    self._teleop_target_zero = None
     self._teleop_latest_target = np.zeros(3) # TODO to 6D pose
     self._robot_zero_pose = np.zeros((arm.dof_count, 4)) # TODO why 4
 
@@ -135,7 +135,7 @@ def init_teleop(state):
   # Set the current robot pose to correspond to the first published teleop target (both are considered "zero")
   #state.lock()
   print_and_cr('setting zero state with lock')
-  state._robot_zero_pose = state._cmd_pose
+  state._robot_zero_pose = state._cmd_pose.copy()
   #state.unlock()
 
   def callback(data):
@@ -143,12 +143,13 @@ def init_teleop(state):
     #cur_point = transformListener.transformPoint("map", data).point
     cur_point = data.point
     #state.lock()
-    if state.teleop_target_zero == -1:
+    if state.teleop_target_zero is None:
       state._teleop_target_zero = np.array([cur_point.x, cur_point.y, cur_point.z])
       state._mode = 'teleop'
       rospy.loginfo('Initialization of teleoperation is completed')
 
     state._teleop_latest_target =  np.array([cur_point.x, cur_point.y, cur_point.z])
+    #rospy.loginfo('updated')
     #state.unlock()
   
   rospy.Subscriber('/M1/point', PointStamped, callback, queue_size=1)
@@ -201,10 +202,20 @@ def construct_command(state, feedback, velocity, dt):
   
 def construct_velocity(state, feedback):
   target_pose = np.zeros_like(state.robot_zero_pose)
-  target_pose[0:3,3] = np.array(state.teleop_latest_target-state.teleop_target_zero).reshape(3,1)
-  delta_pose = target_pose + state.robot_zero_pose - get_current_pose(state.arm, feedback)
+  a,b,c = np.array(state.teleop_latest_target-state.teleop_target_zero).reshape(3,1)
+  d = b
+  b = -c
+  c = d
+  # without tf, manually transform
+  target_pose[0:3, 3] = np.array([a,b,c]).reshape(3,1)
+  #target_pose[0:3,3] = np.array([[1.],[1.0],[0.0001]])
+
+  delta_pose = target_pose + state.robot_zero_pose - state._cmd_pose # get_current_pose(state.arm, feedback)
   velocity = np.array(delta_pose[0:3,3])
-  np.clip(velocity, -0.01, 0.01, out=velocity)
+  tol = 2 * 1e-4
+  velocity[velocity < tol] = 0.0
+  np.clip(velocity, -0.03, 0.03, out=velocity)
+  print(target_pose[0:3,3], state.robot_zero_pose[0:3,3], delta_pose[0:3,3], velocity)
   return velocity
 
 
@@ -253,8 +264,12 @@ def command_proc(state):
         state._speed_base += 0.001
     if current_mode == 'teleop':
       vel = construct_velocity(state, feedback)
-      construct_command(state, feedback, vel, dt)
-      #group.send_command(command)
+      print('vel', vel)
+      command = construct_command(state, feedback, vel, dt)
+      #print(command.position)
+      #print(command.velocity)
+      #print(command.effort)
+
     if current_mode == 'operational':
       if state.jog_direction == 'x_plus':
         x_speed = state._speed_base
@@ -362,6 +377,7 @@ def run():
       state._mode = 'operational'
     elif res == 't':
       print_and_cr('Entering teleoperation mode')
+      state._cmd_pose = state.arm.get_FK(state.current_position)
       init_teleop(state)
     elif res == 'u':
       state._cmd_pose = state.arm.get_FK(state.current_position)
