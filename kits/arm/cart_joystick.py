@@ -108,7 +108,7 @@ def save_gain(group, gain_xml_fn):
     group_info.write_gains(gain_xml_fn)
     print_and_cr('saved gain')
 
-def parse_jog_speed(state):
+def parse_jog_xyz_speed(state):
   x_speed = 0.0
   y_speed = 0.0
   z_speed = 0.0
@@ -127,6 +127,15 @@ def parse_jog_speed(state):
     z_speed = -state._speed_base
 
   return x_speed, y_speed, z_speed
+
+def parse_jog_open_chopstick(state):
+  o_speed = 0.0
+  if state.jog_direction == 'open':
+    o_speed = state._speed_base
+  elif state.jog_direction == 'close':
+    o_speed = -state._speed_base
+
+  return o_speed
 
 #######################################################################
 # Teleop
@@ -207,7 +216,8 @@ def construct_jog_target(state, velocity, dt):
   #cmd_pose_xyz = [xyz_pose[0,0], xyz_pose[1,0], xyz_pose[2,0]]
 
 
-def construct_command(state, feedback, cur_pose, cmd_vel, dt):
+def construct_command(state, feedback, cur_pose, cmd_vel, dt,
+                      chopstick_angle_target=None, chopstick_angle_speed=None):
   command = hebi.GroupCommand(state.arm.group.size)
 
   # position and velocity
@@ -216,9 +226,30 @@ def construct_command(state, feedback, cur_pose, cmd_vel, dt):
 
   #print('cur_pose', cur_pose, 'current_pos', state.current_position, 'cmd_vel', cmd_vel, 'dt', dt)
 
+  # XYZ
   jog_cmd = state.arm.get_jog_xyz(cur_pose, state.current_position, cmd_vel, dt)
   next_angles[0:3] = jog_cmd[0]
   next_speed[0:3] = jog_cmd[1]
+
+  # opening
+  if chopstick_angle_speed:
+    clip_speed = np.clip(chopstick_angle_speed, -0.15, 0.15)
+    chopstick_angle_target = next_angles[-1] + clip_speed * dt
+    if chopstick_angle_target > -0.06 and chopstick_angle_target < -0.72:
+      print('legit')
+    else:
+      chopstick_angle_target = None
+      print('illegit')
+
+  if chopstick_angle_target:
+    #chopstick_angle_target -= 0.37 # TODO turn into a param?
+    delta_angle = chopstick_angle_target - next_angles[-1]
+    if chopstick_angle_target > -0.06 or chopstick_angle_target < -0.72:
+      print('illegal chopstick angle, not processed')
+    elif delta_angle > 5e-3:
+      next_angles[-1] = chopstick_angle_target
+      next_speed[-1] = np.clip(delta_angle/dt, -0.15, 0.15)
+      print('open/close chopstick', next_angles[-1], delta_angle, next_speed[-1])
 
   command.position = next_angles
   command.velocity = next_speed
@@ -263,10 +294,12 @@ def command_proc(state):
       command = construct_command(state, feedback, cmd_pose, cmd_vel, dt)
 
     if current_mode == 'operational':
+
+      # xyz jog
       if(state._speed_base < 0.1):
         state._speed_base += 0.001
-      cmd_pose, cmd_vel = construct_jog_target(state, parse_jog_speed(state), dt)
-      command = construct_command(state, feedback, cmd_pose, cmd_vel, dt)
+      cmd_pose, cmd_vel = construct_jog_target(state, parse_jog_xyz_speed(state), dt)
+      command = construct_command(state, feedback, cmd_pose, cmd_vel, dt, chopstick_angle_speed=parse_jog_open_chopstick(state))
 
     if current_mode == 'teleop' or current_mode == 'operational':
       #sys.stdout.write("{}, {}, {}; \n\n\n".format(command.position, command.velocity, command.effort))
@@ -321,8 +354,8 @@ def run():
         state._cmd_pose = state.arm.get_FK_ee(state.current_position)
 
       jog_dict = {
-        'w': 'x_plus', 'a': 'y_plus', 'j': 'z_plus',
-        's': 'x_minus','d': 'y_minus','l': 'z_minus',
+        'w': 'x_plus', 'a': 'y_plus', 'j': 'z_plus', 'i': 'open',
+        's': 'x_minus','d': 'y_minus','l': 'z_minus', 'o': 'close',
         'k': '0'
       }
       if res in jog_dict.keys():

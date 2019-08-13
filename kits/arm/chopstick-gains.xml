@@ -9,8 +9,8 @@
 		<dead_zone>0.000000 0.000000 0.000000 0.000000 0.000000 0.0 </dead_zone>
 		<i_clamp>0.250000 2.000000 2.000000 1.000000 0.250000 0.25 </i_clamp>
 		<punch>0.000000 0.000000 0.000000 0.000000 0.000000 0.0 </punch>
-		<min_target>-inf -inf -inf -inf -inf -inf </min_target>
-		<max_target>inf inf inf inf inf inf</max_target>
+		<min_target>-inf -inf -inf -inf -inf -0.72 </min_target>
+		<max_target>inf inf inf inf inf -0.06 </max_target>
 		<target_lowpass>1.000000 1.000000 1.000000 1.000000 1.000000 1.0 </target_lowpass>
 		<min_output>-1.000000 -1.000000 -1.000000 -5.000000 -1.000000 -1.0  </min_output>
 		<max_output>1.000000 1.000000 1.000000 5.000000 1.000000 1.0 </max_output>
@@ -25,8 +25,8 @@
 		<dead_zone>0.000000 0.000000 0.000000 0.000000 0.000000 0.0 </dead_zone>
 		<i_clamp>0.250000 0.250000 0.250000 0.250000 0.250000 0.25 </i_clamp>
 		<punch>0.000000 0.000000 0.000000 0.000000 0.000000 0.0 </punch>
-		<min_target>-3.434687 -3.434687 -3.434687 -9.617128 -9.617128 -9.617128 </min_target>
-		<max_target>3.434687 3.434687 3.434687 9.617128 9.617128 9.617128 </max_target>
+		<min_target>-3.434687 -3.434687 -3.434687 -9.617128 -9.617128 -1.0 </min_target>
+		<max_target>3.434687 3.434687 3.434687 9.617128 9.617128 1.0 </max_target>
 		<target_lowpass>1.000000 1.000000 1.000000 1.000000 1.000000 1.0 </target_lowpass>
 		<min_output>-1.000000 -1.000000 -1.000000 -1.000000 -1.000000 -1.0  </min_output>
 		<max_output>1.000000 1.000000 1.000000 1.000000 1.000000 1.0</max_output>
