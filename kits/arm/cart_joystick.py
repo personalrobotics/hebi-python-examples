@@ -32,7 +32,7 @@ class State(object):
 
     self._current_position = np.empty(arm.dof_count, dtype=np.float64)
     self._current_velocity = np.empty(arm.dof_count, dtype=np.float64)
-    self._cmd_pose = arm.get_FK(self._current_position) # The target pose
+    self._cmd_pose = arm.get_FK_ee(self._current_position) # The target pose
     self._update_cmd_pose = False
 
     # For jogging-like cartesian control
@@ -149,7 +149,7 @@ def init_teleop(state):
 
   # Set the current robot pose to correspond to the first published teleop target (both are considered "zero")
   print_and_cr('setting robot\'s zero state')
-  state._cmd_pose = state.arm.get_FK(state.current_position)
+  state._cmd_pose = state.arm.get_FK_ee(state.current_position)
   state._robot_zero_pose = state._cmd_pose.copy()
 
   def callback(data):
@@ -167,7 +167,7 @@ def init_teleop(state):
   rospy.Subscriber('/M1/point', PointStamped, callback, queue_size=1)
 
 def construct_teleop_target(state, feedback, dt):
-  current_pose = state.arm.get_FK(state.current_position)
+  current_pose = state.arm.get_FK_ee(state.current_position)
 
   target_pose = np.zeros_like(state.robot_zero_pose)
   a,b,c = np.array(state.teleop_latest_target-state.teleop_target_zero).reshape(3,1)
@@ -202,7 +202,7 @@ def construct_jog_target(state, velocity, dt):
 
   return target_pose_xyz, target_vel_xyz
 
-  #current_pose = state._cmd_pose # np.array(state.arm.get_FK(state.current_position)) #TODO get rid of it
+  #current_pose = state._cmd_pose
   #xyz_pose = current_pose[0:3,3] + np.array(velocity).reshape(3,1) * dt
   #cmd_pose_xyz = [xyz_pose[0,0], xyz_pose[1,0], xyz_pose[2,0]]
 
@@ -282,7 +282,7 @@ def command_proc(state):
 
 def run():
   # initialize the arm
-  arm = arm_container.create_5_dof('chopstick.hrdf')
+  arm = arm_container.create_robot('chopstick.hrdf')
   state = State(arm)
   load_gain(state.arm.group, 'chopstick-gains.xml')
 
@@ -309,7 +309,7 @@ def run():
     elif res == 'p':
       print_and_cr('Entering jogging mode')
       state._mode = 'operational'
-      state._cmd_pose = state.arm.get_FK(state.current_position)
+      state._cmd_pose = state.arm.get_FK_ee(state.current_position)
       state._update_cmd_pose = True
       state._jog_direction = '0'
     elif res == 't':
@@ -318,7 +318,7 @@ def run():
 
     if current_mode == 'operational':
       if state._update_cmd_pose == True:
-        state._cmd_pose = state.arm.get_FK(state.current_position)
+        state._cmd_pose = state.arm.get_FK_ee(state.current_position)
 
       jog_dict = {
         'w': 'x_plus', 'a': 'y_plus', 'j': 'z_plus',
