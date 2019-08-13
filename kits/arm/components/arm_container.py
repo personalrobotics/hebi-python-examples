@@ -4,28 +4,37 @@ import hebi
 
 class ArmContainer(object):
 
-  def __init__(self, group, robot_model):
+  def __init__(self, group, model_full, model_ee):
     self._group = group
-    self._robot = robot_model
-    self._masses = robot_model.masses
+    self._robot_full = model_full
+    self._robot_ee = model_ee
+    self._masses = model_full.masses
 
   @property
   def dof_count(self):
-    return self._robot.dof_count
+    return self._robot_full.dof_count
+
+  @property
+  def dof_count_ee(self):
+    return self._robot_ee.dof_count
 
   @property
   def group(self):
     return self._group
 
   @property
-  def robot(self):
-    return self._robot
+  def robot_full(self):
+    return self._robot_full
+
+  @property
+  def robot_ee(self):
+    return self._robot_ee
 
   def get_jog_xyz(self, cur_pose, positions, cmd_vel, dt):
-    robot = self._robot
-    
+    robot = self._robot_ee
+
     xyz_objective = hebi.robot_model.endeffector_position_objective(cur_pose)
-    new_arm_joint_angs = robot.solve_inverse_kinematics(positions, xyz_objective)
+    new_arm_joint_angs = robot.solve_inverse_kinematics(positions[:robot.dof_count], xyz_objective)
     # Find the determinant of the jacobian at the endeffector of the solution
     # to the IK. If below a set threshold, set the joint velocities to zero
     # in an attempt to avoid nearing the kinematic singularity. 
@@ -40,7 +49,7 @@ class ArmContainer(object):
       joint_velocities = [0.0, 0.0, 0.0]
     else:
       try:
-        joint_velocities = np.linalg.solve(jacobian_new, cmd_vel)
+        joint_velocities = np.linalg.solve(jacobian_new, cmd_vel[:robot.dof_count])
     #    self._joint_angles[0:3, 0] = new_arm_joint_angs[0:3].reshape((3, 1))
     #    np.copyto(self._grip_pos, self._new_grip_pos)
       except np.linalg.LinAlgError as lin:
@@ -54,7 +63,7 @@ class ArmContainer(object):
   
   def get_jog(self, cmd_pose, positions, cmd_vel, dt):
 
-    robot = self._robot
+    robot = self._robot_ee
 
     cur_pose_xyz = np.array([cmd_pose[0, 3], cmd_pose[1, 3], cmd_pose[2, 3]])
     xyz_objective = hebi.robot_model.endeffector_position_objective(cur_pose_xyz)
@@ -83,9 +92,8 @@ class ArmContainer(object):
     # self._joint_angles[3, 0] = self._joint_angles[3, 0]+(self._joint_velocities[3, 0]*dt)
     return new_arm_joint_angs[0:3] , joint_velocities
 
-  def get_FK(self, positions):
-    robot = self._robot
-    return robot.get_end_effector(positions)
+  def get_FK_ee(self, positions):
+    return self._robot_ee.get_end_effector(positions[:self._robot_ee.dof_count])
 
   def get_grav_comp_efforts(self, feedback, output=None):
     """
@@ -102,9 +110,9 @@ class ArmContainer(object):
     if gravity_norm > 0.0:
       gravity  = gravity / gravity_norm * 9.81
 
-    num_dof = self._robot.dof_count
-    num_frames = self._robot.get_frame_count('CoM')
-    jacobians = self._robot.get_jacobians('CoM', feedback.position)
+    num_dof = self._robot_full.dof_count
+    num_frames = self._robot_full.get_frame_count('CoM')
+    jacobians = self._robot_full.get_jacobians('CoM', feedback.position)
     masses = self._masses
 
     comp_torque = output or np.asmatrix(np.zeros((num_dof, 1), dtype=np.float64))
@@ -118,52 +126,15 @@ class ArmContainer(object):
 
     return comp_torque.A1
 
-
-def create_3_dof():
-  lookup = hebi.Lookup()
-
-  # You can modify the names here to match modules found on your network
-  module_family = 'HEBI'
-  module_names = ['base', 'shoulder', 'elbow']
-
-  from time import sleep
-  sleep(2)
-  arm = lookup.get_group_from_names([module_family], module_names)
-
-  if arm is None:
-    print('\nCould not find arm group: Did you forget to set the module family and names?')
-    print('Searched for modules named:')
-    print("{0} with family '{1}'".format(
-      ', '.join(["'{0}'".format(entry) for entry in module_names]), module_family))
-
-    print('Modules on the network:')
-    for entry in lookup.entrylist:
-      print(entry)
-    else:
-      print('[No Modules Found]')
-    exit(1)
-
-  model = hebi.robot_model.RobotModel()
-  model.add_actuator('X5-4')
-  model.add_bracket('X5-LightBracket', 'right')
-  model.add_actuator('X5-4')
-  model.add_link('X5', extension=0.18, twist=np.pi)
-  model.add_actuator('X5-4')
-  model.add_link('X5', extension=0.18, twist=0)
-
-  assert arm.size == model.dof_count
-  return ArmContainer(arm, model)
-
-
-def create_5_dof(hrdf_filename):
+def create_robot(hrdf_filename):
   lookup = hebi.Lookup()
 
   # You can modify the names here to match modules found on your network
   module_family = 'feeding'
-  module_names = ['0.base', '1.shoulder', '2.elbow','3.wrist1','4.wrist2', '5.wrist3']
+  module_names = ['0.base', '1.shoulder', '2.elbow', '3.wrist1', '4.wrist2', '9.chop']
 
   from time import sleep
-  sleep(2)
+  sleep(1)
   arm = lookup.get_group_from_names([module_family], module_names)
 
   if arm is None:
@@ -179,8 +150,11 @@ def create_5_dof(hrdf_filename):
       print('[No Modules Found]')
     exit(1)
 
-  model = hebi.robot_model.import_from_hrdf(hrdf_filename)
+  # For grav comp. use model_full. For computing IK, use model_ee which exclues chopstick actuator
+  model_ee = hebi.robot_model.import_from_hrdf(hrdf_filename)
+  model_full  = hebi.robot_model.import_from_hrdf(hrdf_filename)
+  model_full.add_actuator('X5-1')
 
-  assert arm.size == model.dof_count
-  return ArmContainer(arm, model)
+  assert arm.size == model_full.dof_count
+  return ArmContainer(arm, model_full, model_ee)
 

@@ -16,7 +16,6 @@ from components import trajectory_time_heuristic
 
 from util.input.keyboard import getch
 
-
 class Waypoint(object):
 
   def __init__(self, num_modules):
@@ -207,7 +206,7 @@ def save_gain(group, gain_xml_fn):
     print('saved gain')
 
 def run():
-  arm = arm_container.create_5_dof('chopstick.hrdf')
+  arm = arm_container.create_robot('chopstick.hrdf')
   state = State(arm)
   load_gain(state.arm.group, 'chopstick-gains.xml')
 
