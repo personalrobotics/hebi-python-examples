@@ -131,9 +131,9 @@ def parse_jog_xyz_speed(state):
 def parse_jog_open_chopstick(state):
   o_speed = 0.0
   if state.jog_direction == 'open':
-    o_speed = state._speed_base
+    o_speed = 0.2
   elif state.jog_direction == 'close':
-    o_speed = -state._speed_base
+    o_speed = -0.2
 
   return o_speed
 
@@ -231,24 +231,27 @@ def construct_command(state, feedback, cur_pose, cmd_vel, dt,
   next_angles[0:3] = jog_cmd[0]
   next_speed[0:3] = jog_cmd[1]
 
-  # opening
-  if chopstick_angle_speed:
-    clip_speed = np.clip(chopstick_angle_speed, -0.15, 0.15)
-    chopstick_angle_target = next_angles[-1] + clip_speed * dt
-    if chopstick_angle_target > -0.06 and chopstick_angle_target < -0.72:
-      print('legit')
-    else:
-      chopstick_angle_target = None
-      print('illegit')
+  # chopstick open and close
+  if chopstick_angle_speed: # For jogging
+    chopstick_angle_target = next_angles[-1] + chopstick_angle_speed * dt
+    if ((chopstick_angle_speed > 0 and chopstick_angle_target > -0.06) or
+        (chopstick_angle_speed < 0 and chopstick_angle_target < -0.72)):
+      print(chopstick_angle_speed, next_angles[-1], chopstick_angle_target, 'illegit')
+      chopstick_angle_speed = chopstick_angle_target = None
+    elif chopstick_angle_speed > 0 and chopstick_angle_target < -0.72:
+      chopstick_angle_target = -0.719999
+    elif chopstick_angle_speed < 0 and chopstick_angle_target > -0.06:
+      chopstick_angle_target = -0.061000
 
   if chopstick_angle_target:
     #chopstick_angle_target -= 0.37 # TODO turn into a param?
     delta_angle = chopstick_angle_target - next_angles[-1]
+    chop_speed = delta_angle / dt
     if chopstick_angle_target > -0.06 or chopstick_angle_target < -0.72:
-      print('illegal chopstick angle, not processed')
-    elif delta_angle > 5e-3:
+      print('illegal chopstick angle target')
+    elif abs(chop_speed) > 0.05:
       next_angles[-1] = chopstick_angle_target
-      next_speed[-1] = np.clip(delta_angle/dt, -0.15, 0.15)
+      next_speed[-1] = np.clip(chop_speed, -0.2, 0.2)
       print('open/close chopstick', next_angles[-1], delta_angle, next_speed[-1])
 
   command.position = next_angles
