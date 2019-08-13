@@ -160,7 +160,7 @@ def create_5_dof(hrdf_filename):
 
   # You can modify the names here to match modules found on your network
   module_family = 'feeding'
-  module_names = ['0.base', '1.shoulder', '2.elbow','3.wrist1','4.wrist2']
+  module_names = ['0.base', '1.shoulder', '2.elbow','3.wrist1','4.wrist2', '5.wrist3']
 
   from time import sleep
   sleep(2)

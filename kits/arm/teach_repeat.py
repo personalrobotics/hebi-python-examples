@@ -132,9 +132,7 @@ def command_proc(state):
       break
 
     feedback.get_position(state.current_position)
-    grav_comp_effort = state.arm.get_grav_comp_efforts(feedback).copy()
-    grav_comp_effort[1] = grav_comp_effort[1] - 7.0
-    command.effort = grav_comp_effort
+    command.effort = state.arm.get_grav_comp_efforts(feedback).copy()
 
     current_mode = state.mode
 

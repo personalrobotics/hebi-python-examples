@@ -133,17 +133,24 @@ def parse_jog_speed(state):
 #######################################################################
 
 def init_teleop(state):
+  # Initialize teleoperation
+  # - set the robot pose as zero
+  # - set the first chopstick pose as zero
+  # - continuely stream chopstick pose as target
   # ensures you have locked state outside this function scope
+
   print_and_cr('Initializing teleoperation')
   rospy.init_node('hebiteleop')
 
   # tf
   transformListener = tf.TransformListener()
-  transformListener.waitForTransform("/optitrack_natnet", "/map", rospy.Time(0),rospy.Duration(1.0))
+  trans, rot = transformListener.lookupTransform('/optitrack_natnet', '/map', rospy.Time(0))
+  #transformListener.waitForTransform("/optitrack_natnet", "/map", rospy.Time(0),rospy.Duration(1.0))
 
   # Set the current robot pose to correspond to the first published teleop target (both are considered "zero")
-  print_and_cr('setting zero state')
-  state._robot_zero_pose = state.arm.get_FK(state.current_position)
+  print_and_cr('setting robot\'s zero state')
+  state._cmd_pose = state.arm.get_FK(state.current_position)
+  state._robot_zero_pose = state._cmd_pose.copy()
 
   def callback(data):
     #rospy.loginfo('Received chobi-teleop info %f %f %f', data.point.x, data.point.y, data.point.z)
@@ -176,10 +183,10 @@ def construct_teleop_target(state, feedback, dt):
   velocity[velocity < tol] = 0.0
   np.clip(velocity, -0.05, 0.05, out=velocity)
 
-  #target_pose = current_pose + velocity * dt
+  target_pose = current_pose + velocity * dt
   #print(target_pose[0:3,3], state.robot_zero_pose[0:3,3], delta_pose[0:3,3], velocity)
 
-  return current_pose, velocity
+  return target_pose, velocity
 
 
 def construct_jog_target(state, velocity, dt):
@@ -215,13 +222,7 @@ def construct_command(state, feedback, cur_pose, cmd_vel, dt):
 
   command.position = next_angles
   command.velocity = next_speed
-
-  # effort: grav comp and spring offset
-  grav_comp_effort = state.arm.get_grav_comp_efforts(feedback).copy()
-  total_effort = np.empty(5, np.float64)
-  spring_effort = 4.0 - 5.0*(state.current_position[1] - 1.4)
-  np.add(grav_comp_effort, [0.0, -spring_effort, 0.0, 0.0, 0.0], total_effort)
-  command.effort = total_effort
+  command.effort = state.arm.get_grav_comp_efforts(feedback).copy()
 
   return command
 
@@ -258,14 +259,14 @@ def command_proc(state):
     last_time = cur_time
 
     if current_mode == 'teleop':
-      cur_pose, cmd_vel = construct_teleop_target(state, feedback, dt)
-      command = construct_command(state, feedback, cur_pose, cmd_vel, dt)
+      cmd_pose, cmd_vel = construct_teleop_target(state, feedback, dt)
+      command = construct_command(state, feedback, cmd_pose, cmd_vel, dt)
 
     if current_mode == 'operational':
       if(state._speed_base < 0.1):
         state._speed_base += 0.001
-      cur_pose, cmd_vel = construct_jog_target(state, parse_jog_speed(state), dt)
-      command = construct_command(state, feedback, cur_pose, cmd_vel, dt)
+      cmd_pose, cmd_vel = construct_jog_target(state, parse_jog_speed(state), dt)
+      command = construct_command(state, feedback, cmd_pose, cmd_vel, dt)
 
     if current_mode == 'teleop' or current_mode == 'operational':
       #sys.stdout.write("{}, {}, {}; \n\n\n".format(command.position, command.velocity, command.effort))
