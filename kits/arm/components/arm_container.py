@@ -111,12 +111,17 @@ class ArmContainer(object):
 
     return comp_torque.A1
 
-def create_robot(hrdf_filename):
+def create_robot(hrdf_filename, dof=7):
   lookup = hebi.Lookup()
 
   # You can modify the names here to match modules found on your network
   module_family = 'feeding'
-  module_names = ['0.base', '1.shoulder', '2.elbow', '3.wrist1', '4.wrist2', '9.chop']
+  if dof == 7:
+    module_names = ['0.base', '1.shoulder', '2.elbow', '3.wrist1', '4.wrist2', '5.wrist3', '9.chop']
+  elif dof == 6:
+    module_names = ['0.base', '1.shoulder', '2.elbow', '3.wrist1', '4.wrist2', '9.chop']
+  elif dof == 5:
+    module_names = ['0.base', '1.shoulder', '2.elbow', '3.wrist1', '9.chop']
 
   from time import sleep
   sleep(1)
@@ -138,7 +143,7 @@ def create_robot(hrdf_filename):
   # For grav comp. use model_full. For computing IK, use model_ee which exclues chopstick actuator
   model_ee = hebi.robot_model.import_from_hrdf(hrdf_filename)
   model_full  = hebi.robot_model.import_from_hrdf(hrdf_filename)
-  model_full.add_bracket('X5-LightBracket', 'left')
+  model_full.add_bracket('X5-LightBracket', 'right')
   model_full.add_actuator('X5-1')
 
   assert arm.size == model_full.dof_count

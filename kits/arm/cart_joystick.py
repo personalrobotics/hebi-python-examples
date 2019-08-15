@@ -342,9 +342,11 @@ def command_proc(state):
 
 def run():
   # initialize the arm
-  arm = arm_container.create_robot('chopstick.hrdf')
+  DOF = 7
+
+  arm = arm_container.create_robot('chopstick.hrdf', dof=DOF)
   state = State(arm)
-  load_gain(state.arm.group, 'chopstick-gains.xml')
+  load_gain(state.arm.group, 'chopstick-gains-{}D.xml'.format(DOF))
 
   # command is sent out via a separate thread
   cmd_thread = Thread(target=command_proc,

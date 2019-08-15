@@ -9,4 +9,6 @@
   <actuator type="X5-1"/>
   <bracket type="X5LightRight"/>
   <actuator type="X5-1"/>
+  <bracket type="X5LightLeft"/>
+  <actuator type="X5-1"/>
 </robot>
