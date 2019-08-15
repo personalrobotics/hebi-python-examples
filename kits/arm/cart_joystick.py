@@ -9,7 +9,6 @@ from time import time, sleep
 # Ros
 import rospy
 from geometry_msgs.msg import PointStamped
-import tf
 
 # HEBI
 import hebi
@@ -171,11 +170,6 @@ def init_teleop(state):
   print_and_cr('Initializing teleoperation')
   rospy.init_node('hebiteleop')
 
-  # tf
-  transformListener = tf.TransformListener()
-  trans, rot = transformListener.lookupTransform('/optitrack_natnet', '/map', rospy.Time(0))
-  #transformListener.waitForTransform("/optitrack_natnet", "/map", rospy.Time(0),rospy.Duration(1.0))
-
   # Set the current robot pose to correspond to the first published teleop target (both are considered "zero")
   print_and_cr('setting robot\'s zero state')
   state._cmd_pose = state.arm.get_FK_ee(state.current_position)
@@ -183,7 +177,6 @@ def init_teleop(state):
 
   def callback(data):
     #rospy.loginfo('Received chobi-teleop info %f %f %f', data.point.x, data.point.y, data.point.z)
-    #cur_point = transformListener.transformPoint("map", data).point
     cur_point = data.point
     state.lock()
     if state.teleop_target_zero is None:
@@ -199,12 +192,8 @@ def construct_teleop_target(state, feedback, dt):
   current_pose = state.arm.get_FK_ee(state.current_position)
 
   target_pose = np.zeros_like(state.robot_zero_pose)
-  a,b,c = np.array(state.teleop_latest_target-state.teleop_target_zero).reshape(3,1)
-  d = b
-  b = -c
-  c = d
-  # without tf, manually transform
-  target_pose[0:3, 3] = np.array([a,b,c]).reshape(3,1)
+  target_pose[0:3, 3] = np.array(state.teleop_latest_target
+                                 - state.teleop_target_zero).reshape(3,1)
 
   delta_pose = target_pose + state.robot_zero_pose - current_pose
   velocity = np.array(delta_pose[0:3,3])
