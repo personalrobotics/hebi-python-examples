@@ -33,6 +33,7 @@ class ArmContainer(object):
   def get_jog_xyz(self, positions, cmd_pose, cmd_vel, dt):
     robot = self._robot_ee
     dof = robot.dof_count
+
     cmd_pose_xyz = np.array([cmd_pose[0, 3], cmd_pose[1, 3], cmd_pose[2, 3]])
     cmd_vel_xyz = cmd_vel[0:3]
 
@@ -55,8 +56,7 @@ class ArmContainer(object):
 
     return new_arm_joint_angs[0:3] , joint_velocities
   
-  def get_jog(self, cmd_pose, positions, cmd_vel, dt):
-
+  def get_jog(self, positions, cmd_pose, cmd_vel, dt):
     robot = self._robot_ee
     dof = robot.dof_count
 

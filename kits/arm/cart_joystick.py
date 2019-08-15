@@ -234,7 +234,7 @@ def construct_command(state, feedback, cmd_pose, cmd_vel, dt,
   next_speed = [0.0] * state.arm.group.size
 
   # XYZ
-  jog_cmd = state.arm.get_jog_xyz(state.current_position, cmd_pose, cmd_vel, dt)
+  jog_cmd = state.arm.get_jog(state.current_position, cmd_pose, cmd_vel, dt)
   dof = jog_cmd[0].shape[0]
   next_angles[:dof] = jog_cmd[0]
   next_speed[:dof] = jog_cmd[1]
