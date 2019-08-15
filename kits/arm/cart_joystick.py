@@ -45,7 +45,7 @@ class State(object):
 
   def __init__(self, arm):
     self._quit = False
-    self._mode = 'training'
+    self._mode = 'idle'
     self._arm = arm
 
     self._current_position = np.empty(arm.dof_count, dtype=np.float64)
@@ -60,7 +60,7 @@ class State(object):
     # For teleop-based cartesian control
     self._teleop_target_zero = None
     self._teleop_latest_target = None # TODO d$ np.zeros(6) # 6D target pose
-    self._robot_zero_pose = None # TODO d$ arm.get_FK_ee(self._current_position)
+    self._ee_zero_pose = None # TODO d$ arm.get_FK_ee(self._current_position)
 
     # For threading safety
     self._mutex = Lock()
@@ -99,8 +99,8 @@ class State(object):
     return self._teleop_latest_target
   
   @property
-  def robot_zero_pose(self):
-    return self._robot_zero_pose
+  def ee_zero_pose(self):
+    return self._ee_zero_pose
 
   def lock(self):
     self._mutex.acquire()
@@ -173,7 +173,7 @@ def init_teleop(state):
   # Set the current robot pose to correspond to the first published teleop target (both are considered "zero")
   print_and_cr('setting robot\'s zero state')
   state._cmd_pose = state.arm.get_FK_ee(state.current_position)
-  state._robot_zero_pose = state._cmd_pose.copy()
+  state._ee_zero_pose = state._cmd_pose.copy()
 
   def callback(data):
     #rospy.loginfo('Received chobi-teleop info %f %f %f', data.point.x, data.point.y, data.point.z)
@@ -186,24 +186,25 @@ def init_teleop(state):
     state._teleop_latest_target =  np.array([cur_point.x, cur_point.y, cur_point.z])
     state.unlock()
   
-  rospy.Subscriber('/M1/point', PointStamped, callback, queue_size=1)
+  rospy.Subscriber('/M1/point', PointStamped, callback, queue_size=10)
 
 def construct_teleop_target(state, feedback, dt):
-  current_pose = state.arm.get_FK_ee(state.current_position)
+  target_move = (state.teleop_latest_target - state.teleop_target_zero).reshape(3,1)
+  target_move[abs(target_move) < 1e-3] = 0.0
+  #print(target_move, '\r\n---\r\n', state.teleop_latest_target, '-',state.teleop_target_zero, '\r\n===\r\n')
 
-  target_pose = np.zeros_like(state.robot_zero_pose)
-  target_pose[0:3, 3] = np.array(state.teleop_latest_target
-                                 - state.teleop_target_zero).reshape(3,1)
+  target_ee_pose = state.ee_zero_pose.copy()
+  target_ee_pose[0:3, 3] += target_move
 
-  delta_pose = target_pose + state.robot_zero_pose - current_pose
-  velocity = np.array(delta_pose[0:3,3])
-  tol = 2 * 1e-4
-  velocity[velocity < tol] = 0.0
-  np.clip(velocity, -0.05, 0.05, out=velocity)
+  current_ee_pose = state.arm.get_FK_ee(state.current_position)
 
-  target_pose = current_pose + velocity * dt
-  #print(target_pose[0:3,3], state.robot_zero_pose[0:3,3], delta_pose[0:3,3], velocity)
+  delta_pose = target_ee_pose - current_ee_pose
+  velocity = np.array(delta_pose[0:3,3]) / 10.0 / dt
+  velocity[abs(velocity) < 0.03] = 0.0
+  np.clip(velocity, -0.1, 0.1, out=velocity)
 
+  target_pose = current_ee_pose.copy()
+  target_pose[0:3, 3] += velocity * dt
   return target_pose, velocity
 
 
@@ -375,6 +376,8 @@ def run():
     elif res == 't':
       print_and_cr('Entering teleoperation mode')
       init_teleop(state)
+    elif res == 'z':
+      state._mode = 'idle'
     elif res =='v':
       state._print = True
 

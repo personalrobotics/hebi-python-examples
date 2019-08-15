@@ -34,8 +34,9 @@ class ArmContainer(object):
     robot = self._robot_ee
     dof = robot.dof_count
     cmd_pose_xyz = np.array([cmd_pose[0, 3], cmd_pose[1, 3], cmd_pose[2, 3]])
+    cmd_vel_xyz = cmd_vel[0:3]
+
     xyz_objective = hebi.robot_model.endeffector_position_objective(cmd_pose_xyz)
-    print(xyz_objective, positions[:dof])
     new_arm_joint_angs = robot.solve_inverse_kinematics(positions[:dof], xyz_objective)
     # Find the determinant of the jacobian at the endeffector of the solution
     # to the IK. If below a set threshold, set the joint velocities to zero
@@ -46,7 +47,7 @@ class ArmContainer(object):
 
     if (det_J_new >= 0.01):
       try:
-        cmd_vel_xyz = cmd_vel[0:3]
+
         joint_velocities = np.linalg.solve(jacobian_new, cmd_vel_xyz)
       except np.linalg.LinAlgError as lin:
         # This may happen still sometimes
@@ -69,17 +70,11 @@ class ArmContainer(object):
 
     try:
       joint_velocities = np.linalg.pinv(jacobian_new) * np.array(cmd_vel).reshape(6,1);
-  #    self._joint_angles[0:3, 0] = new_arm_joint_angs[0:3].reshape((3, 1))
-  #    np.copyto(self._grip_pos, self._new_grip_pos)
     except np.linalg.LinAlgError as lin:
-  #    # This may happen still sometimes
-      print('No solution found. \n\n\n')
+      print('No solution found. Not sending command. \n\n\n')
       new_arm_joint_angs = positions
       joint_velocities = np.zeros(dof, np.float64)
 
-    # wrist_vel = self._direction*self._user_commanded_wrist_velocity
-    # self._joint_velocities[3, 0] = self._joint_velocities[1, 0]+self._joint_velocities[2, 0]+wrist_vel
-    # self._joint_angles[3, 0] = self._joint_angles[3, 0]+(self._joint_velocities[3, 0]*dt)
     return new_arm_joint_angs[:dof] , joint_velocities
 
   def get_FK_ee(self, positions):
