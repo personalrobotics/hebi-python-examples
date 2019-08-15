@@ -59,8 +59,8 @@ class State(object):
 
     # For teleop-based cartesian control
     self._teleop_target_zero = None
-    self._teleop_latest_target = np.zeros(3) # TODO to 6D pose
-    self._robot_zero_pose = np.zeros((arm.dof_count, 4))
+    self._teleop_latest_target = None # TODO d$ np.zeros(6) # 6D target pose
+    self._robot_zero_pose = None # TODO d$ arm.get_FK_ee(self._current_position)
 
     # For threading safety
     self._mutex = Lock()
@@ -215,17 +215,16 @@ def construct_jog_target(state, velocity, dt):
   state._cmd_pose[1,3] = state._cmd_pose[1,3] + y_speed*dt;
   state._cmd_pose[2,3] = state._cmd_pose[2,3] + z_speed*dt;
 
-  target_pose_xyz = [state._cmd_pose[0,3], state._cmd_pose[1,3], state._cmd_pose[2,3]]
   target_vel_xyz = [x_speed, y_speed, z_speed, 0.0, 0.0, 0.0]
 
-  return target_pose_xyz, target_vel_xyz
+  return state._cmd_pose, target_vel_xyz
 
   #current_pose = state._cmd_pose
   #xyz_pose = current_pose[0:3,3] + np.array(velocity).reshape(3,1) * dt
   #cmd_pose_xyz = [xyz_pose[0,0], xyz_pose[1,0], xyz_pose[2,0]]
 
 
-def construct_command(state, feedback, cur_pose, cmd_vel, dt,
+def construct_command(state, feedback, cmd_pose, cmd_vel, dt,
                       chopstick_angle_target=None, chopstick_angle_speed=None):
   command = hebi.GroupCommand(state.arm.group.size)
 
@@ -233,10 +232,8 @@ def construct_command(state, feedback, cur_pose, cmd_vel, dt,
   next_angles = state.current_position
   next_speed = [0.0] * state.arm.group.size
 
-  #print('cur_pose', cur_pose, 'current_pos', state.current_position, 'cmd_vel', cmd_vel, 'dt', dt)
-
   # XYZ
-  jog_cmd = state.arm.get_jog(cur_pose, state.current_position, cmd_vel, dt)
+  jog_cmd = state.arm.get_jog_xyz(state.current_position, cmd_pose, cmd_vel, dt)
   dof = jog_cmd[0].shape[0]
   next_angles[:dof] = jog_cmd[0]
   next_speed[:dof] = jog_cmd[1]
@@ -248,18 +245,17 @@ def construct_command(state, feedback, cur_pose, cmd_vel, dt,
         (chopstick_angle_speed < 0 and chopstick_angle_target < -0.72)):
       print(chopstick_angle_speed, next_angles[-1], chopstick_angle_target, 'illegit')
       chopstick_angle_speed = chopstick_angle_target = None
-    elif chopstick_angle_speed > 0 and chopstick_angle_target < -0.72:
-      chopstick_angle_target = -0.719999
-    elif chopstick_angle_speed < 0 and chopstick_angle_target > -0.06:
-      chopstick_angle_target = -0.061000
+    elif chopstick_angle_speed > 0 and chopstick_angle_target <= -0.72:
+      chopstick_angle_target = -0.72
+    elif chopstick_angle_speed < 0 and chopstick_angle_target >= -0.06:
+      chopstick_angle_target = -0.06
 
   if chopstick_angle_target:
     #chopstick_angle_target -= 0.37 # TODO turn into a param?
     delta_angle = chopstick_angle_target - next_angles[-1]
     chop_speed = delta_angle / dt
-    if chopstick_angle_target > -0.06 or chopstick_angle_target < -0.72:
-      print('illegal chopstick angle target')
-    elif abs(chop_speed) > 0.05:
+    chopstick_angle_target = np.clip(chopstick_angle_target, -0.72, -0.06)
+    if abs(chop_speed) > 0.05:
       next_angles[-1] = chopstick_angle_target
       next_speed[-1] = np.clip(chop_speed, -0.2, 0.2)
       print('open/close chopstick', next_angles[-1], delta_angle, next_speed[-1])
@@ -268,6 +264,11 @@ def construct_command(state, feedback, cur_pose, cmd_vel, dt,
   command.velocity = next_speed
   command.effort = state.arm.get_grav_comp_efforts(feedback).copy()
 
+  return command
+
+def grav_comp_command(state, feedback):
+  command = hebi.GroupCommand(state.arm.group.size)
+  command.effort = state.arm.get_grav_comp_efforts(feedback).copy()
   return command
 
 def command_proc(state):
@@ -321,13 +322,15 @@ def command_proc(state):
       if(state._speed_base < 0.1):
         state._speed_base += 0.001
       cmd_pose, cmd_vel = construct_jog_target(state, parse_jog_xyz_speed(state), dt)
-      command = construct_command(state, feedback, state._cmd_pose, cmd_vel, dt,
+      command = construct_command(state, feedback, cmd_pose, cmd_vel, dt,
                                   chopstick_angle_speed=parse_jog_open_chopstick(state))
 
     if current_mode == 'teleop' or current_mode == 'operational':
       #sys.stdout.write("{}, {}, {}; \n\n\n".format(command.position, command.velocity, command.effort))
       #sys.stdout.flush()
       group.send_command(command)
+    else:
+      group.send_command(grav_comp_command(state, feedback))
     
     state.unlock()
 
