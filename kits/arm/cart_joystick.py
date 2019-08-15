@@ -3,6 +3,7 @@ from __future__ import print_function
 import os
 import sys
 import numpy as np
+import math
 from time import time, sleep
 
 # Ros
@@ -22,6 +23,24 @@ sys.path = [root_path] + sys.path
 from components import arm_container
 from util.input.keyboard import getch
 
+def euler_angles_from_rotation_matrix(R):
+    '''
+    From a paper by Gregory G. Slabaugh (undated),
+    "Computing Euler angles from a rotation matrix
+    '''
+    phi = 0.0
+    if np.isclose(R[2,0], -1.0):
+        theta = math.pi/2.0
+        psi = math.atan2(R[0,1],R[0,2])
+    elif np.isclose(R[2,0], 1.0):
+        theta = -math.pi/2.0
+        psi = math.atan2(-R[0,1],-R[0,2])
+    else:
+        theta = -math.asin(R[2,0])
+        cos_theta = math.cos(theta)
+        psi = math.atan2(R[2,1]/cos_theta, R[2,2]/cos_theta)
+        phi = math.atan2(R[1,0]/cos_theta, R[0,0]/cos_theta)
+    return 180*psi/math.pi, 180*theta/math.pi, 180*phi/math.pi
 
 class State(object):
 
@@ -46,6 +65,7 @@ class State(object):
 
     # For threading safety
     self._mutex = Lock()
+    self._print = False;
 
   @property
   def quit(self):
@@ -207,7 +227,7 @@ def construct_jog_target(state, velocity, dt):
   state._cmd_pose[2,3] = state._cmd_pose[2,3] + z_speed*dt;
 
   target_pose_xyz = [state._cmd_pose[0,3], state._cmd_pose[1,3], state._cmd_pose[2,3]]
-  target_vel_xyz = [x_speed, y_speed, z_speed]
+  target_vel_xyz = [x_speed, y_speed, z_speed, 0.0, 0.0, 0.0]
 
   return target_pose_xyz, target_vel_xyz
 
@@ -227,9 +247,10 @@ def construct_command(state, feedback, cur_pose, cmd_vel, dt,
   #print('cur_pose', cur_pose, 'current_pos', state.current_position, 'cmd_vel', cmd_vel, 'dt', dt)
 
   # XYZ
-  jog_cmd = state.arm.get_jog_xyz(cur_pose, state.current_position, cmd_vel, dt)
-  next_angles[0:3] = jog_cmd[0]
-  next_speed[0:3] = jog_cmd[1]
+  jog_cmd = state.arm.get_jog(cur_pose, state.current_position, cmd_vel, dt)
+  dof = jog_cmd[0].shape[0]
+  next_angles[:dof] = jog_cmd[0]
+  next_speed[:dof] = jog_cmd[1]
 
   # chopstick open and close
   if chopstick_angle_speed: # For jogging
@@ -287,10 +308,19 @@ def command_proc(state):
     feedback.get_velocity(state.current_velocity)
 
     current_mode = state.mode
-    
+
     cur_time = time()
     dt = cur_time - last_time
     last_time = cur_time
+
+    if state._print :
+      pose_mat = state.arm.get_FK_ee(state.current_position)
+      pose_xyz_rpy = np.empty(6)
+      pose_xyz_rpy[0:3] = pose_mat[0:3,3].reshape(3)
+      pose_xyz_rpy[3:6] = euler_angles_from_rotation_matrix(pose_mat[0:3,0:3])
+      print(pose_xyz_rpy)
+      print('\r\n----\r\n')
+      state._print = False
 
     if current_mode == 'teleop':
       cmd_pose, cmd_vel = construct_teleop_target(state, feedback, dt)
@@ -302,7 +332,8 @@ def command_proc(state):
       if(state._speed_base < 0.1):
         state._speed_base += 0.001
       cmd_pose, cmd_vel = construct_jog_target(state, parse_jog_xyz_speed(state), dt)
-      command = construct_command(state, feedback, cmd_pose, cmd_vel, dt, chopstick_angle_speed=parse_jog_open_chopstick(state))
+      command = construct_command(state, feedback, state._cmd_pose, cmd_vel, dt,
+                                  chopstick_angle_speed=parse_jog_open_chopstick(state))
 
     if current_mode == 'teleop' or current_mode == 'operational':
       #sys.stdout.write("{}, {}, {}; \n\n\n".format(command.position, command.velocity, command.effort))
@@ -329,8 +360,9 @@ def run():
   cmd_thread.start()
 
   # this script is preserved for switching modes
+  np.set_printoptions(suppress=True)
   print_and_cr("Press 'p' to enable cartesian control (wsadjl for moving, k for stopping)." +
-               "\nPress 'g' to save gains, 't' to teleop and 'q' to quit.")
+               "\r\nPress 'g' to save gains, 't' to teleop and 'q' to quit.")
   res = getch()
 
   while res != 'q' and not state.quit:
@@ -351,6 +383,8 @@ def run():
     elif res == 't':
       print_and_cr('Entering teleoperation mode')
       init_teleop(state)
+    elif res =='v':
+      state._print = True
 
     if current_mode == 'operational':
       if state._update_cmd_pose == True:

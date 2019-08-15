@@ -64,33 +64,36 @@ class ArmContainer(object):
   def get_jog(self, cmd_pose, positions, cmd_vel, dt):
 
     robot = self._robot_ee
+    dof = robot.dof_count
 
     cur_pose_xyz = np.array([cmd_pose[0, 3], cmd_pose[1, 3], cmd_pose[2, 3]])
     xyz_objective = hebi.robot_model.endeffector_position_objective(cur_pose_xyz)
-    #orientation = cmd_pose[0:3, 0:3]
-    #theta_objective = hebi.robot_model.endeffector_so3_objective(orientation)
-    new_arm_joint_angs = robot.solve_inverse_kinematics(positions, xyz_objective)
+    orientation = cmd_pose[0:3, 0:3]
+    theta_objective = hebi.robot_model.endeffector_so3_objective(orientation, weight = 0.6)
+    new_arm_joint_angs = robot.solve_inverse_kinematics(positions[:dof], xyz_objective,theta_objective)
 
     # Find the determinant of the jacobian at the endeffector of the solution
     # to the IK. If below a set threshold, set the joint velocities to zero
     # in an attempt to avoid nearing the kinematic singularity. 
-    jacobian_new = robot.get_jacobian_end_effector(new_arm_joint_angs)[0:3, 0:3]
-    det_J_new = abs(np.linalg.det(jacobian_new))
-    joint_velocities = np.zeros(3, np.float64)
+    jacobian_new = robot.get_jacobian_end_effector(new_arm_joint_angs)
+    det_J_new = 1#abs(np.linalg.det(jacobian_new))
+    joint_velocities = np.zeros(dof, np.float64)
 
     if (det_J_new > 0.01):
       try:
-        joint_velocities = np.linalg.solve(jacobian_new, cmd_vel)
+        joint_velocities = np.linalg.pinv(jacobian_new) * np.array(cmd_vel).reshape(6,1);
     #    self._joint_angles[0:3, 0] = new_arm_joint_angs[0:3].reshape((3, 1))
     #    np.copyto(self._grip_pos, self._new_grip_pos)
       except np.linalg.LinAlgError as lin:
     #    # This may happen still sometimes
-        joint_velocities = np.zeros(3, np.float64)
+        print('No solution found. \n\n\n')
+        new_arm_joint_angs = positions
+        joint_velocities = np.zeros(dof, np.float64)
 
     # wrist_vel = self._direction*self._user_commanded_wrist_velocity
     # self._joint_velocities[3, 0] = self._joint_velocities[1, 0]+self._joint_velocities[2, 0]+wrist_vel
     # self._joint_angles[3, 0] = self._joint_angles[3, 0]+(self._joint_velocities[3, 0]*dt)
-    return new_arm_joint_angs[0:3] , joint_velocities
+    return new_arm_joint_angs[:dof] , joint_velocities
 
   def get_FK_ee(self, positions):
     return self._robot_ee.get_end_effector(positions[:self._robot_ee.dof_count])
@@ -153,6 +156,7 @@ def create_robot(hrdf_filename):
   # For grav comp. use model_full. For computing IK, use model_ee which exclues chopstick actuator
   model_ee = hebi.robot_model.import_from_hrdf(hrdf_filename)
   model_full  = hebi.robot_model.import_from_hrdf(hrdf_filename)
+  model_full.add_bracket('X5-LightBracket', 'left')
   model_full.add_actuator('X5-1')
 
   assert arm.size == model_full.dof_count
