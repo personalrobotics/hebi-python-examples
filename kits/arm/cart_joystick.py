@@ -225,6 +225,33 @@ def construct_jog_target(state, velocity, dt):
   #cmd_pose_xyz = [xyz_pose[0,0], xyz_pose[1,0], xyz_pose[2,0]]
 
 
+def get_impedence_control_effort(state, cmd_pose, cmd_vel, feedback)
+  pose_gains = np.zeros(6)  # We will have to tune this
+  velocity_gains = np.zeros(6)  # We will have to tune this
+
+  robot = state.arm._robot_ee
+
+  current_pose = state.arm.get_FK_ee(feedback.position)
+  current_jacobian = robot.get_jacobian_end_effector(feedback.position)[0:3,0:3]
+  current_velocity = np.zeros(6)
+  np.dot(current_jacobian, feedbacl.velocity, out=current_velocity)
+
+  pose_error = np.zeros(6)
+  vel_error = np.zeros(6)
+  pose_effort = np.zeros(6)
+  vel_effort = np.zeros(6)
+  total_ee_effort = np.zeros(6)
+  total_joint_effort = np.zeros(6)
+  np.substract(cmd_pose, current_pose, out=pose_error)
+  np.substract(cmd_vel, current_velocity, out=vel_error)
+  np.multiply(pose_error, pose_gains, out=pose_effort)
+  np.multiply(vel_error, velocity_gains, out=vel_effort)
+  np.add(pose_effort, vel_effort, total_ee_effort)
+  np.dot(current_jacobian.T, total_ee_effort, out=total_joint_effort)
+
+  return total_joint_effort
+
+
 def construct_command(state, feedback, cmd_pose, cmd_vel, dt,
                       chopstick_angle_target=None, chopstick_angle_speed=None):
   command = hebi.GroupCommand(state.arm.group.size)
@@ -261,9 +288,13 @@ def construct_command(state, feedback, cmd_pose, cmd_vel, dt,
       next_speed[-1] = np.clip(chop_speed, -0.2, 0.2)
       print('open/close chopstick', next_angles[-1], delta_angle, next_speed[-1])
 
+  grav_comp_effort = state.arm.get_grav_comp_efforts(feedback).copy()
+  impedence_control_effort = get_impedence_control_effort(state, cmd_pose, cmd_vel, feedbak).copy()
+
   command.position = next_angles
   command.velocity = next_speed
-  command.effort = state.arm.get_grav_comp_efforts(feedback).copy()
+  np.add(grav_comp_effort, impedence_control_effort, out=command.effort)
+  
 
   return command
 
